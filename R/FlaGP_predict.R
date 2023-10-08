@@ -191,13 +191,13 @@ map_predict = function(flagp,map,X.pred.orig=NULL,n.samples=1,return.samples=F,s
     D = flagp$basis$obs$D
     ym = flagp$Y.data$obs$mean
     ysd = flagp$Y.data$obs$sd
-    n.y = nrow(flagp$Y.data$obs$orig)
+    n.y = flagp$Y.data$obs$n.y
   } else{
     B = flagp$basis$sim$B
     D = flagp$basis$sim$D
     ym = flagp$Y.data$sim$mean
     ysd = flagp$Y.data$sim$sd
-    n.y = nrow(flagp$Y.data$sim$orig)
+    n.y = flagp$Y.data$sim$n.y
   }
   n.pc = ncol(B)
   n.pc.delta = ncol(D)
