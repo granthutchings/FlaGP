@@ -216,7 +216,7 @@ mv_lengthscales = function(XT,p.x,p.t,V.t,g,subsample,m,K,seed,ls.prior,ls.paral
       if(ls.parallel){
         tmp.ls[,,k] = foreach::foreach(i=1:n.pc,.combine='rbind') %dopar% get_ls(XT[samp.id[[k]],],V.t[i,samp.id[[k]]],dConfig,g,k,i)
       } else{
-        tmp.ls[,,k] = t(sapply(1:n.pc, function(i) get_ls(XT[samp.id[[k]],],V.t[i,samp.id[[k]]],dConfig,g,k,i)))
+        tmp.ls[,,k] = t(sapply(1:n.pc, function(i) get_ls(XT[samp.id[[k]],,drop=F],V.t[i,samp.id[[k]]],dConfig,g,k,i)))
         ##### DEV #####
         # try using mlegp - didn't seem to change much
         # tmp.ls[,,k] = t(sapply(1:n.pc, function(i) 1/nugget=g,nugget.known=1,verbose=0,simplex.ntries = 1)$beta))
@@ -504,6 +504,44 @@ flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                   
                     bias=F,D=NULL,                                                                      # discrepancy
                     small=F,seed=NULL,verbose=T,
                     rsvd = F){                                                       # additional flags
+
+  # force inputs to be matrices
+  if(!is.null(X.sim) & is.null(dim(X.sim))){
+    X.sim = matrix(X.sim,ncol=1)
+  }
+  if(!is.null(T.sim) & is.null(dim(T.sim))){
+    T.sim = matrix(T.sim,ncol=1)
+  }
+  if(!is.null(X.obs) & is.null(dim(X.obs))){
+    X.obs = matrix(X.obs,ncol=1)
+  }
+  if(is.null(dim(Y.sim))){
+    Y.sim = matrix(Y.sim,nrow=1)
+  }
+  if(!is.null(Y.obs) & is.null(dim(Y.obs))){
+    Y.obs = matrix(Y.obs,nrow=1)
+  }
+
+  # force certain parameters if scalar response
+  if(nrow(Y.sim)==1){
+    response.type = 'scalar'
+    y.ind.sim = matrix(1)
+    if(!is.null(Y.obs))
+      y.ind.obs = matrix(1)
+    scaletype = 'scalar' # force this for scalar response
+    B = matrix(1)
+    if(bias){
+      D = matrix(1)
+    } else{
+      D = NULL
+    }
+    rsvd = F
+    n.pc = 1
+    pct.var = NULL
+  } else{
+    response.type = 'functional'
+  }
+
   data = list(bias=bias,num=list(m=ncol(Y.sim),
                                  n=max(0,ncol(Y.obs)),
                                  p.x = max(0,ncol(X.sim)),
@@ -512,6 +550,7 @@ flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                   
   # print information about data
   if(verbose){
     cat('Building FlaGP data object.\n')
+    cat('Response:', response.type, '\n')
     cat('m:', data$num$m,'\n')
     cat('n:', data$num$n,'\n')
     if(is.null(n.pc)){
@@ -536,8 +575,7 @@ flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                   
   if(verbose){cat('done.\n')}
   if(verbose){cat('computing sim basis... ')}
   data$basis = list(); class(data$basis) = c('basis',class(data$basis))
-  data$basis$sim = get_basis(data$Y.data$sim$trans,n.pc,pct.var,F,B,V.t,bias=bias,D=D,
-                        rsvd=rsvd)
+  data$basis$sim = get_basis(data$Y.data$sim$trans,n.pc,pct.var,F,B,V.t,bias=bias,D=D,rsvd=rsvd)
   if(verbose){cat('done.\n')}
   if(!is.null(Y.obs)){
     precomp = TRUE
@@ -658,7 +696,7 @@ blhs.loop.lite = function (y, X, m, K, da, g = 0.001, maxit = 100)
                               ab = da$ab, maxit = maxit)
         i = i+maxit
         if(mle$conv==1){
-          message(paste('Warning: mleGPsep for bootstrap replicate',K,'and basis component',i,'has not converged after',i*100,'iterations.'))
+          message(paste('Warning: mleGPsep for bootstrap replicate',K,'has not converged after',i*100,'iterations.'))
         }
       }
       laGP::deleteGPsep(gpsepi)

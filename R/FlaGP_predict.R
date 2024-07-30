@@ -386,6 +386,9 @@ mcmc_predict = function(flagp ,mcmc, X.pred.orig, samp.ids, n.samples, return.sa
 em_only_predict = function(flagp, X.pred.orig, n.samples, return.samples, support, end.eta, y, native, conf.int, predvar)
 {
   returns = list()
+  if(is.null(dim(X.pred.orig))){
+    X.pred.orig = matrix(X.pred.orig,ncol=1)
+  }
   n.pred = nrow(X.pred.orig)
   # get predictive samples of w at X.pred.orig
   start.time = proc.time()

@@ -19,7 +19,7 @@ t_at_d = function(C,d,R,g){
 # number of x inputs
 p.x = 2
 # number of simulations
-m = 10082
+m = 98
 
 # sim data
 set.seed(11)
@@ -29,7 +29,7 @@ X.sim = lhs::create_oalhs(m,p.x,T,F)
 X.range = matrix(c(.1,2,.01,.5),nrow=p.x,ncol=2,byrow = T)
 X.sim[,1] = X.sim[,1] * (X.range[1,2]-X.range[1,1]) + X.range[1,1]
 X.sim[,2] = X.sim[,2] * (X.range[2,2]-X.range[2,1]) + X.range[2,1]
-plot.sample = sample(1:10000,1000)
+plot.sample = sample(1:m,min(m,1000))
 pairs(X.sim[plot.sample,],labels = c('R','C'))
 
 # generate simulations
@@ -56,7 +56,7 @@ We generate new synthetic data and compare predictions to data. This problem is 
 
 ```{r, echo=F}
 set.seed(11)
-n.pred = 16
+n.pred = 101
 X.pred = lhs::create_oalhs(n.pred,p.x,T,F)
 X.pred[,1] = X.pred[,1] * (X.range[1,2]-X.range[1,1]) + X.range[1,1]
 X.pred[,2] = X.pred[,2] * (X.range[2,2]-X.range[2,1]) + X.range[2,1]

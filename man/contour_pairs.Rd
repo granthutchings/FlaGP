@@ -12,7 +12,7 @@ contour_pairs(
   g.min = 0,
   g.max = 1,
   cols = c("cornflowerblue", "darkorange", "forestgreen"),
-  labels = c("FlaGP")
+  labels = NULL
 )
 }
 \arguments{

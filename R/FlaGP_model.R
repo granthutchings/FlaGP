@@ -284,7 +284,7 @@ aGPsep_SC_mv = function(X, Z, XX, g, start=6, end=50, bias=F, sample=F, predvar=
 
   n.pc = nrow(Z)
   n.XX = ifelse(bias,nrow(XX),nrow(XX[[1]]))
-  p.t = ifelse(bias,ncol(XX),ncol(XX[[1]]))
+  # p.t = ifelse(bias,ncol(XX),ncol(XX[[1]]))
   mean = array(dim=c(n.pc,n.XX))
   var = array(dim=c(n.pc,n.XX))
 

@@ -6,7 +6,7 @@
 #' @param prop.sd.init vector of initial proposal distribution sd's
 #' @param n.samples integer number of mcmc samples to keep
 #' @param n.burn integer number of initial samples to discard
-#' @param adapt.par vector of parameters for addaptive metropolis. The first parameter it the first iteration to begin adaptation, the second is the frequency of adaptation, the third is the number of past samples to include for adaptation, and the fourth is the iteration to stop adaptation.
+#' @param adapt.par vector of parameters for addaptive metropolis. The first parameter it the first iteration to begin adaptation, the second is the frequency of adaptation, the third is the proportion of past samples to include for adaptation, and the fourth is the iteration to stop adaptation.
 #' @param end.eta integer number of neighbors to use for laGP emulator
 #' @param delta.method Model used for discrepancy. 'newGP' is a full GP using laGP default emperical bayes. 'rgasp' is a default RobustGaSP implementation and 'lagp' is an laGP predictor using the ALC criterion
 #' @param start.delta initial neighborhood size for bias model. Only applicable if delta.method='lagp'
@@ -28,7 +28,7 @@ mcmc = function(flagp,
                 ssq.init=.01,
                 prop.cov=diag((.5/3)^2,flagp$XT.data$p.t+1),
                 n.samples=10000,n.burn=1000,
-                adapt.par = c(100,50,50,1000),
+                adapt.par = c(100,50,.5,1000),
                 end.eta=50,
                 delta.method='newGP',start.delta=6,end.delta=50,
                 theta.prior='beta',theta.prior.params=c(2,2),
@@ -38,6 +38,9 @@ mcmc = function(flagp,
                 sample=as.logical(ifelse(flagp$bias,F,T)),
                 verbose=T)
 {
+  if(is.null(flagp$Y.data$n)){
+    stop('Cannot perform calibration, no observed data in model.')
+  }
   ptm = proc.time()
   # constants and initializations
   bias = flagp$bias
@@ -45,13 +48,11 @@ mcmc = function(flagp,
 
   t.curr = t.init
   ssq.curr = ssq.init
-  # llt = fit_model(t.curr,flagp,F,sample,end.eta,delta.method,start.delta,end.delta,F,
-  #                 theta.prior,theta.prior.params,ssq.prior,ssq.prior.params)
+
   llt = fit_model(t.curr,ssq.curr,flagp,F,sample,end.eta,delta.method,start.delta,end.delta,F,
                   theta.prior,theta.prior.params,ssq.prior,ssq.prior.params)
   llt$ll = llt$ll + logit.jacobian(t.curr) + log.jacobian(ssq.curr) # jacobian is added here because it may be hard to move from initial location otherwise (jacobian can be a large decrease in llh)
-  # if(sample.type=='logit')
-  #   llt$ll = llt$ll
+
   llt.prev = llt
   ll.prop = list()
 
@@ -83,17 +84,9 @@ mcmc = function(flagp,
     t.prop = prop$t.prop
     ssq.prop = prop$ssq.prop
 
-    # if(any(t.prop<0) | any(t.prop>1)){
-    #   ll.prop$ll = -Inf
-    # } else{
     ll.prop = fit_model(t.prop,ssq.prop,flagp,F,sample,end.eta,delta.method,start.delta,end.delta,F,
                         theta.prior,theta.prior.params,ssq.prior,ssq.prior.params)
     ll.prop$ll = ll.prop$ll + logit.jacobian(t.prop) + log.jacobian(ssq.prop)
-      # ll.prop = fit_model(t.prop,flagp,F,sample,end.eta,delta.method,start.delta,end.delta,F,
-      #                     theta.prior,theta.prior.params,ssq,prior,ssq.prior.params)
-    # }
-    # if(sample.type=='logit')
-    #   ll.prop$ll = ll.prop$ll + logit.jacobian(t.prop) + log.jacobian(ssq.prop)
 
     # we have to recompute this every time to account for the variability in the likelihood at t.curr,
     # otherwise, the chain does not mix well.
@@ -148,19 +141,12 @@ mcmc = function(flagp,
 
     # adapt proposal distribution
     if(i>=adapt.par[1] & i<=adapt.par[4] & i %% adapt.par[2] == 0){
-      interval = max(i-adapt.par[2]+1,1):i
+      interval = max(1,i-floor(adapt.par[3]*i)):i
       t.interval = t.store[interval,,drop=F]
       ssq.interval = ssq.store[interval]
       lambda = ifelse(i==adapt.par[1],1,update$lambda)
-      # if(sample.type=='logit'){
-        # update = update_tuning_mv(i, mean(accept[interval]), lambda=lambda, log(t.interval/(1-t.interval)),
-        #                           prop.cov/lambda)
       update = update_tuning_mv(i, mean(accept[interval]), lambda=lambda, cbind(log(t.interval/(1-t.interval)),ssq.interval),
                                 prop.cov/lambda)
-      # } else{
-      #   update = update_tuning_mv(i, mean(accept[interval]), lambda=lambda, t.interval,
-      #                             prop.cov/lambda)
-      # }
       prop.cov = update$lambda * update$Sigma_tune
     }
   }

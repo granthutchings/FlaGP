@@ -4,7 +4,15 @@
 \alias{plot.flagp}
 \title{FlaGP data plots}
 \usage{
-\method{plot}{flagp}(flagp, basis = T, legend = T, xlab = "x", ylab = "y", ...)
+\method{plot}{flagp}(
+  flagp,
+  basis = T,
+  legend = T,
+  sim.subsample = 1:flagp$Y.data$m,
+  xlab = "x",
+  ylab = "y",
+  ...
+)
 }
 \arguments{
 \item{flagp}{an \code{flagp} object.}

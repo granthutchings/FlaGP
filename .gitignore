@@ -9,6 +9,6 @@ dev
 # ignore C files
 *.c
 *.o
-*.so
+*src/.so
 *.h
 .Rproj.user

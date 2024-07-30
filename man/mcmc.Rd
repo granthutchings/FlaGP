@@ -7,21 +7,21 @@
 mcmc(
   flagp,
   t.init = rep(0.5, flagp$XT.data$p.t),
-  prop.cov = diag((0.5/3)^2, flagp$XT.data$p.t),
+  ssq.init = 0.01,
+  prop.cov = diag((0.5/3)^2, flagp$XT.data$p.t + 1),
   n.samples = 10000,
   n.burn = 1000,
-  update.every = 50,
-  stop.update = 1000,
+  adapt.par = c(100, 50, 50, 1000),
   end.eta = 50,
   delta.method = "newGP",
   start.delta = 6,
   end.delta = 50,
   theta.prior = "beta",
   theta.prior.params = c(2, 2),
-  ssq.prior.params = c(1, 0.001),
+  ssq.prior = "hcauchy",
+  ssq.prior.params = c(0.5),
   prev.samples = NULL,
   recalc.llh = F,
-  prop.type = "mv",
   sample = as.logical(ifelse(flagp$bias, F, T)),
   verbose = T
 )
@@ -35,9 +35,7 @@ mcmc(
 
 \item{n.burn}{integer number of initial samples to discard}
 
-\item{update.every}{integer sample frequency that proposal covariance should be updated, only working for update.every=1 currently}
-
-\item{stop.update}{integer sample index where proposal covariance updates should stop}
+\item{adapt.par}{vector of parameters for addaptive metropolis. The first parameter it the first iteration to begin adaptation, the second is the frequency of adaptation, the third is the number of past samples to include for adaptation, and the fourth is the iteration to stop adaptation.}
 
 \item{end.eta}{integer number of neighbors to use for laGP emulator}
 
@@ -56,8 +54,6 @@ mcmc(
 \item{prev.samples}{Use in accordance with add_samples(). A matrix of samples can be passed in to be used for proposal covariance estimation.}
 
 \item{recalc.llh}{Should the likelihood be recalculated at every iteration. Generally this should be False and only considered if sample=T. Recalculing the likelihood with a new sample from the emulator (and discrepancy) can be useful if mcmc mixing is a problem. This is only likely to happen if a discrepancy model is being used or if the emulator poorly fits the observations and no discrepancy model is used. Importantly, inference is approximate if recalculation is used, as posterior variance will be artificially increased.}
-
-\item{prop.type}{Default of multivariate proposal ('mv') with a dense proposal covariance matrix. Any other value will result in a diagonal proposal covariance matrix.}
 
 \item{sample}{Account for uncertainty in the emulator and discrepancy model by sampling rather than by including the variance in the likelihood. Default is sample=T when bias=F which works well because sampling variability in the emulator is usually small. For a biased calibration we recommend sample=F. This will increase the cost of likelihood calculation, but result in a much more stable mcmc.}
 

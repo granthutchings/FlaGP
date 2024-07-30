@@ -21,7 +21,6 @@ parallel_mcmc(
   ssq.prior.params = c(1, 0.001),
   prev.samples = NULL,
   recalc.llh = F,
-  prop.type = "mv",
   verbose = T,
   n.chains = 2,
   n.cores = 2

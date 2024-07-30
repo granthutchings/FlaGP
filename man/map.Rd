@@ -17,13 +17,18 @@ map(
   end.delta = 50,
   theta.prior = "beta",
   theta.prior.params = c(2, 2),
-  ssq.prior.params = c(1, 0.001)
+  ssq.prior = "hcauchy",
+  ssq.prior.params = c(0.5)
 )
 }
 \arguments{
 \item{flagp}{x an \code{flagp} object.}
 
 \item{n.restarts}{size of random sample used to initialize the optimizer}
+
+\item{init}{matrix of locations to initialize the optimizer}
+
+\item{seed}{seed for reproducable initial conditions for the optimizer}
 
 \item{opts}{list of options for crs::snomadr}
 }
