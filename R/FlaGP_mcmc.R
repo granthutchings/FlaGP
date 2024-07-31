@@ -1,3 +1,35 @@
+mcmc_mh = function(flagp,
+                   t.init=rep(.5,flagp$XT.data$p.t),
+                   ssq.init=.01,
+                   prop.cov=diag((.5/3)^2,flagp$XT.data$p.t+1),
+                   n.samples=10000,n.burn=1000,
+                   adapt.par = c(100,50,.5,1000),
+                   end.eta=50,
+                   delta.method='newGP',start.delta=6,end.delta=50,
+                   theta.prior='beta',theta.prior.params=c(2,2),
+                   ssq.prior='hcauchy',ssq.prior.params=c(.5),
+                   prev.samples=NULL,
+                   recalc.llh=F,
+                   sample=as.logical(ifelse(flagp$bias,F,T)),
+                   verbose=T){
+  llh = function(par,...){
+    t.curr = par[1:flagp$XT.data$p.t]
+    ssq.curr = par[flagp$XT.data$p.t+1]
+    if(ssq.curr<0 | any(t.curr<0) | any(t.curr>1)){
+      return(-Inf)
+    }
+    llt = fit_model(t.curr,ssq.curr,flagp,F,sample,end.eta,delta.method,start.delta,end.delta,F,
+                    theta.prior,theta.prior.params,ssq.prior,ssq.prior.params)
+    llt$ll
+  }
+  adapt.par[4] = adapt.par[4]/n.samples
+  if(recalc.llh){
+    Metro_Hastings_Stochastic(llh,c(t.init,ssq.init),prop.cov,NULL,n.samples,n.burn,adapt.par,F)
+  } else{
+    MHadaptive::Metro_Hastings(llh,c(t.init,ssq.init),prop.cov,NULL,n.samples,n.burn,adapt.par,F)
+  }
+}
+
 #' @title FlaGP MCMC with joint proposal
 #'
 #' @description Addaptive MCMC as defined in Haario et al. 2001 - "An adaptive Metropolis algorithm"
@@ -195,7 +227,13 @@ log.jacobian = function(ssq){
 proposal = function(t.curr,ssq.curr,p.t,prop.cov){
   # propose theta on logit scale and error variance on log scale
   par.prop = mvnfast::rmvn(1,c(log(t.curr/(1-t.curr)),log(ssq.curr)), prop.cov)
-  return(list(t.prop=exp(par.prop[1:p.t])/(1+exp(par.prop[1:p.t])),
+  t.prop = exp(par.prop[1:p.t])/(1+exp(par.prop[1:p.t]))
+
+  # NA's can happen when proposal covariance gets too big exp(huge)=Inf
+  t.prop[is.na(t.prop)] = 1
+  t.prop[t.prop<.Machine$double.eps] = .Machine$double.eps
+
+  return(list(t.prop=t.prop,
               ssq.prop=exp(par.prop[p.t+1])))
 }
 # Function to add samples to existing mcmc object, starting from the last interation.

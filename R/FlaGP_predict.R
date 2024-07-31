@@ -305,7 +305,7 @@ mcmc_predict = function(flagp ,mcmc, X.pred.orig, samp.ids, n.samples, return.sa
     n.y = flagp$Y.data$sim$n.y
   }
   if(is.null(samp.ids)){
-    samp.ids = seq(1,(mcmc$n.samples - mcmc$n.burn), length.out = n.samples)
+    samp.ids = as.integer(seq(1,(mcmc$n.samples - mcmc$n.burn), length.out = n.samples))
   } else{
     n.samples = length(samp.ids)
   }

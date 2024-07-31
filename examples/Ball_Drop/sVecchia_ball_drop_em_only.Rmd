@@ -1,0 +1,96 @@
+---
+title: "Ball Drop Example, No Bias"
+author: "Grant Hutchings"
+date: "2/23/2022"
+output: pdf_document
+---
+
+```{r , echo=FALSE}
+t_at_d = function(C,d,R,g){
+  (acosh(exp(C*d/R)))/(sqrt(C*g/R))
+}
+
+# number of x inputs
+p.x = 2
+# number of simulations
+m = 10082
+
+# sim data
+set.seed(11)
+# create design over (R,C) on [0,1]
+X.sim = lhs::create_oalhs(m,p.x,T,F)
+# put inputs on physically relavant scale
+X.range = matrix(c(.1,2,.01,.5),nrow=p.x,ncol=2,byrow = T)
+X.sim[,1] = X.sim[,1] * (X.range[1,2]-X.range[1,1]) + X.range[1,1]
+X.sim[,2] = X.sim[,2] * (X.range[2,2]-X.range[2,1]) + X.range[2,1]
+plot.sample = sample(1:10000,1000)
+pairs(X.sim[plot.sample,],labels = c('R','C'))
+
+# generate simulations
+y.ind.sim = as.matrix(seq(1,25,1)) # distance (meters)
+d = length(y.ind.sim)
+Y.sim = matrix(nrow=length(y.ind.sim),ncol=m)
+for(i in 1:m){
+  Y.sim[,i] = t_at_d(C=X.sim[i,2],d=y.ind.sim,R=X.sim[i,1],g=9.8)
+}
+matplot(Y.sim[,plot.sample],type='l',xlab='distance (m)',ylab='time (s)',lty=2)
+```
+
+```{r sVecchia}
+source('~/Desktop/Computer Experiments papers/Reading Group/scaledVecchia/vecchia_scaled.R')
+library(FlaGP)
+# get basis rep using FlaGP
+flagp.data = flagp(X.sim = X.sim, Y.sim = Y.sim, n.pc = 2,
+                   ls.m = 5, verbose=T) 
+B = flagp.data$basis$sim$B
+w = flagp.data$basis$sim$V.t
+n.pc = flagp.data$basis$sim$n.pc
+# X = flagp.data$XT.data$sim$X$trans
+vecchia.models = list()
+for(i in 1:n.pc){
+  vecchia.models[[i]] = fit_scaled(w[i,],X.sim,nug=1e-8)
+}
+```
+
+# Prediction
+
+We generate new synthetic data and compare predictions to data. This problem is incredibly simple, and we have a huge number of data points (10,000) in only 2 input dimensions, so predictions are accurate and emulator uncertainty is very small.
+
+```{r, echo=F}
+set.seed(11)
+n.pred = 16
+X.pred = lhs::create_oalhs(n.pred,p.x,T,F)
+X.pred[,1] = X.pred[,1] * (X.range[1,2]-X.range[1,1]) + X.range[1,1]
+X.pred[,2] = X.pred[,2] * (X.range[2,2]-X.range[2,1]) + X.range[2,1]
+Y.pred = matrix(nrow=length(y.ind.sim),ncol=nrow(X.pred))
+for(i in 1:ncol(Y.pred)){
+  Y.pred[,i] = (t_at_d(C=X.pred[i,2],d=y.ind.sim,R=X.pred[i,1],g=9.8))
+}
+
+n.samples = 1000
+ptm = proc.time()
+vecchia.w.pred = lapply(1:n.pc, function(i) predictions_scaled(vecchia.models[[i]],X.pred,m=50,joint = T,nsims = n.samples,predvar = T))
+vecchia.w.samples = lapply(1:n.pc, function(i) vecchia.w.pred[[i]]$samples)
+vecchia.w.samples = abind::abind(vecchia.w.samples[[1]],vecchia.w.samples[[2]],along=3)
+vecchia.y.pred = array(0,dim=c(n.samples,d,n.pred))
+for(i in 1:n.samples){
+  vecchia.y.pred[i,,] = B %*% t(drop(vecchia.w.samples[,i,]))
+  for(j in 1:n.pred){
+    vecchia.y.pred[i,,j] = vecchia.y.pred[i,,j] * flagp.data$Y.data$sim$sd + flagp.data$Y.data$sim$mean
+  }
+}
+vecchia.y.mean = apply(vecchia.y.pred,2:3,mean)
+vecchia.y.conf = apply(vecchia.y.pred,2:3,quantile,c(.025,.975))
+
+
+pred.time = ptm[3] - proc.time()[3]
+cat('pred time:',pred.time,'s \n')
+cat('RMSE:',mean(sqrt((vecchia.y.mean - Y.pred)^2)),'\n')
+cat('MAPE:',median(100*abs((vecchia.y.mean - Y.pred)/Y.pred)),'\n')
+
+plot.id = c(1,5,10)
+matplot(Y.pred[,plot.id],type='l',col='black',lty=1,xlab='distance (m)',ylab='time (s)')
+matplot(vecchia.y.mean[,plot.id],type='l',lty=1,col='darkorange',add=T)
+matplot(vecchia.y.conf[1,,plot.id],type='l',lty=2,col='lightblue',add=T)
+matplot(vecchia.y.conf[2,,plot.id],type='l',lty=2,col='lightblue',add=T)
+```

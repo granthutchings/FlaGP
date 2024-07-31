@@ -9,6 +9,7 @@ dev
 # ignore C files
 *.c
 *.o
-*src/.so
+src/FlaGP.so
 *.h
 .Rproj.user
+examples/Aluminum
