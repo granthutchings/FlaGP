@@ -652,7 +652,7 @@ sc_inputs = function(X,ls){
 print.flagp = function(flagp){
   cat('FlaGP Model.\n')
   cat('Response:', flagp$flags$responsetype, '\n')
-  cat('Biased:', flagp$flags$bias, '\n')
+  cat('Biased:', as.character(flagp$flags$bias), '\n')
   cat('m:', flagp$num$m,'\n')
   cat('n:', flagp$num$n,'\n')
   if(is.null(flagp$basis$sim$n.pc)){

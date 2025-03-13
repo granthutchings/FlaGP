@@ -1,9 +1,9 @@
 # ypred_samp n.samples x n.y x n
-energy_score = function(y.samp,y,terms=F){
+energy_score = function(y.samp,y,terms=F,parallel=T){
   n.samples = dim(y.samp)[1]
   n.y = dim(y.samp)[2]
   n = dim(y.samp)[3]
-
+  cat('n:',n)
   # make sure the field data shape matches the samples shape
   if(!all(dim(y)==c(n.y,n)))
     dim(y) = c(n.y,n)
@@ -22,11 +22,26 @@ energy_score = function(y.samp,y,terms=F){
 
   }
   if(terms){
-    # es = matrix(unlist(parallel::mclapply(1:n, function(i) get_es(i,terms))),ncol=2,byrow=T)
-    es = foreach::foreach(i=1:n,.combine = rbind) %dopar% unlist(get_es(i,terms))
+    if(parallel){
+      # es = matrix(unlist(parallel::mclapply(1:n, function(i) get_es(i,terms))),ncol=2,byrow=T)
+      es = foreach::foreach(i=1:n,.combine = rbind) %dopar% unlist(get_es(i,terms))
+    } else{
+      es = matrix(nrow=n,ncol=2)
+      for(i in 1:n){
+        es[i,] = unlist(get_es(i,terms))
+      }
+    }
+
   } else{
-    # es = unlist(parallel::mclapply(1:n, function(i) get_es(i,terms)))
-    es = foreach::foreach(i=1:n,.combine = c) %dopar% get_es(i,terms)
+    if(parallel){
+      es = unlist(parallel::mclapply(1:n, function(i) get_es(i,terms)))
+      # es = foreach::foreach(i=1:n,.combine = c) %dopar% get_es(i,terms)
+    } else{
+      es = numeric(n)
+      for(i in 1:n){
+        es[i] = get_es(i,terms)
+      }
+    }
   }
 
   return(es)
