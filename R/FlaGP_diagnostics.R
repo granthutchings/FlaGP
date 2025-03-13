@@ -22,11 +22,11 @@ energy_score = function(y.samp,y,terms=F){
 
   }
   if(terms){
-    es = matrix(unlist(parallel::mclapply(1:n, function(i) get_es(i,terms))),ncol=2,byrow=T)
+    # es = matrix(unlist(parallel::mclapply(1:n, function(i) get_es(i,terms))),ncol=2,byrow=T)
+    es = foreach::foreach(i=1:n,.combine = rbind) %dopar% unlist(get_es(i,terms))
   } else{
-    es = unlist(
-      parallel::mclapply(1:n, function(i) get_es(i,terms))
-    )
+    # es = unlist(parallel::mclapply(1:n, function(i) get_es(i,terms)))
+    es = foreach::foreach(i=1:n,.combine = c) %dopar% get_es(i,terms)
   }
 
   return(es)

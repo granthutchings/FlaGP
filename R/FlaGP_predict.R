@@ -390,6 +390,10 @@ mcmc_predict = function(flagp ,mcmc, X.pred.orig, samp.ids, n.samples, return.sa
       ysd = flagp[[k]]$Y.data$sim$sd
       n.y = flagp[[k]]$Y.data$sim$n.y
     }
+    if(!native){
+      ym = 0
+      ysd = 1
+    }
     if(is.null(samp.ids)){
       if(n.samples == 0)
         n.samples = 1
@@ -401,11 +405,15 @@ mcmc_predict = function(flagp ,mcmc, X.pred.orig, samp.ids, n.samples, return.sa
     t.pred = t(t(mcmc$t.samp[samp.ids,,drop=F]) * flagp[[k]]$XT.data$sim$T$range + flagp[[k]]$XT.data$sim$T$min)
     ssq.samp = mcmc$ssq.samp[samp.ids]
     returns[[k]]$y.samp = array(0,dim=c(n.samples,n.y,n.pred))
+    if(resid.error)
+      returns[[k]]$y.samp.resid.error = array(0,dim=c(n.samples,n.y,n.pred))
+
     returns[[k]]$eta.samp = array(0,dim=c(n.samples,n.y,n.pred))
     if(flagp[[k]]$bias)
       returns[[k]]$delta.samp = array(0,dim=c(n.samples,n.y,n.pred))
     start.time = proc.time()
     for(i in 1:n.samples){
+      # just get w, v predictions for timing
       w = predict_w(flagp[[k]],X.pred.orig,t.pred[i,],sample=T,end=end.eta,n.pc=flagp[[k]]$basis$sim$n.pc)
       returns[[k]]$eta.samp[i,,] = B%*%drop(w$sample)
 
@@ -413,73 +421,93 @@ mcmc_predict = function(flagp ,mcmc, X.pred.orig, samp.ids, n.samples, return.sa
         # Biased prediction add delta model
         v = FlaGP:::mv_delta_predict(X.pred.orig,mcmc$delta[[i]],flagp[[k]],sample=T,n.samples=1,start=start.eta,end=end.eta)
         returns[[k]]$delta.samp[i,,] = D%*%drop(v$sample) # if we scaled y.resid before fitting v, we probably need to scale again here
+      }
+    }
+    returns[[k]]$pred.time = proc.time() - start.time
+
+    for(i in 1:n.samples){
+      # w = predict_w(flagp[[k]],X.pred.orig,t.pred[i,],sample=T,end=end.eta,n.pc=flagp[[k]]$basis$sim$n.pc)
+      # returns[[k]]$eta.samp[i,,] = B%*%drop(w$sample)
+
+      if(flagp[[k]]$bias){
+        # Biased prediction add delta model
+        # v = FlaGP:::mv_delta_predict(X.pred.orig,mcmc$delta[[i]],flagp[[k]],sample=T,n.samples=1,start=start.eta,end=end.eta)
+        # returns[[k]]$delta.samp[i,,] = D%*%drop(v$sample) # if we scaled y.resid before fitting v, we probably need to scale again here
         for(j in 1:n.pred){
           if(resid.error){
             # sigma noise is on standardized scale, so add noise before scaling back to native with ysd and ym
-            returns[[k]]$y.samp[i,,j] = (returns[[k]]$eta.samp[i,,j,drop=F]+returns[[k]]$delta.samp[i,,j,drop=F] + (rnorm(n.y) * sqrt(ssq.samp[i])))
+            returns[[k]]$y.samp.resid.error[i,,j] = ((returns[[k]]$eta.samp[i,,j,drop=F]+returns[[k]]$delta.samp[i,,j,drop=F]) + (rnorm(n.y) * sqrt(ssq.samp[i]))) * ysd + ym
+            returns[[k]]$y.samp[i,,j] = (returns[[k]]$eta.samp[i,,j,drop=F]+returns[[k]]$delta.samp[i,,j,drop=F]) * ysd + ym
           } else{
-            returns[[k]]$y.samp[i,,j] = (returns[[k]]$eta.samp[i,,j,drop=F]+returns[[k]]$delta.samp[i,,j,drop=F])
+            returns[[k]]$y.samp[i,,j] = (returns[[k]]$eta.samp[i,,j,drop=F]+returns[[k]]$delta.samp[i,,j,drop=F]) * ysd + ym
           }
-          if(native)
-            returns[[k]]$y.samp[i,,j] = returns[[k]]$y.samp[i,,j] * ysd + ym
         }
       } else{
         # Unbiased prediction eta only
         for(j in 1:n.pred){
           if(resid.error){
-            returns[[k]]$y.samp[i,,j] = (returns[[k]]$eta.samp[i,,j,drop=F] + (rnorm(n.y) * sqrt(ssq.samp[i])))
+            returns[[k]]$y.samp.resid.error[i,,j] = (returns[[k]]$eta.samp[i,,j,drop=F] + (rnorm(n.y) * sqrt(ssq.samp[i]))) * ysd + ym
+            returns[[k]]$y.samp[i,,j] = returns[[k]]$eta.samp[i,,j,drop=F] * ysd + ym
           } else{
-            returns[[k]]$y.samp[i,,j] = returns[[k]]$eta.samp[i,,j,drop=F]
+            returns[[k]]$y.samp[i,,j] = returns[[k]]$eta.samp[i,,j,drop=F] * ysd + ym
           }
-          if(native)
-            returns[[k]]$y.samp[i,,j] = returns[[k]]$y.samp[i,,j] * ysd + ym
         }
       }
     }
-    returns[[k]]$time = proc.time() - start.time
     returns[[k]]$y.mean = apply(returns[[k]]$y.samp,2:3,mean)
     if(y.conf.int)
-      returns[[k]]$y.conf.int = apply(returns[[k]]$y.samp,2:3,quantile,c(.025,.975))
+      if(resid.error){
+        returns[[k]]$y.conf.int = apply(returns[[k]]$y.samp.resid.error,2:3,quantile,c(.025,.975))
+      } else{
+        returns[[k]]$y.conf.int = apply(returns[[k]]$y.samp,2:3,quantile,c(.025,.975))
+      }
     if(y.var)
-      returns[[k]]$y.var = apply(returns[[k]]$y.samp,2:3,var)
+      if(resid.error){
+        returns[[k]]$y.var = apply(returns[[k]]$y.samp.resid.error,2:3,var)
+      } else{
+        returns[[k]]$y.var = apply(returns[[k]]$y.samp,2:3,var)
+      }
 
     if(return.eta){
       # convert to standard scale first
-      if(native){
-        for(i in 1:n.samples){
-          returns[[k]]$eta.samp[i,,] = returns[[k]]$eta.samp[i,,] * ysd + ym
-        }
+      for(i in 1:n.samples){
+        returns[[k]]$eta.samp[i,,] = returns[[k]]$eta.samp[i,,] * ysd + ym
       }
       returns[[k]]$eta.mean = apply(returns[[k]]$eta.samp,2:3,mean)
       returns[[k]]$eta.y.conf.int = apply(returns[[k]]$eta.samp,2:3,quantile,c(.025,.975))
     }
+
     if(flagp[[k]]$bias & return.delta){
       # convert to standard scale first
-      if(native){
-        for(i in 1:n.samples){
-          returns[[k]]$delta.samp[i,,] = returns[[k]]$delta.samp[i,,] * ysd
-        }
+      for(i in 1:n.samples){
+        returns[[k]]$delta.samp[i,,] = returns[[k]]$delta.samp[i,,] * ysd
       }
-
       returns[[k]]$delta.mean = apply(returns[[k]]$delta.samp,2:3,mean)
       returns[[k]]$delta.y.conf.int = apply(returns[[k]]$delta.samp,2:3,quantile,c(.025,.975))
     }
-    if(!return.samples)
+
+    if(!return.samples){
       returns[[k]]$y.samp = NULL
-    returns[[k]]$eta.samp = NULL
-    if(flagp[[k]]$bias)
+      returns[[k]]$y.samp.resid.error = NULL
+    }
+    if(!return.eta)
+      returns[[k]]$eta.samp = NULL
+    if(!return.delta)
       returns[[k]]$delta.samp = NULL
   }
 
   return(returns[[1]])
 }
 
-  # MCMC predict, but without having access to eta and delta samples from mcmc object
+# calibrated prediction without having access to eta and delta samples from mcmc/map object
 # this may be most useful when using MAP estimation with a Hessian derived covariance matrix
 sample_predict = function(flagp, model, X.pred.orig, n.samples, return.samples, support,
                           end.eta, start.delta, end.delta, return.eta, return.delta,
                           native, y.conf.int,
                           resid.error, w.var,y.var){
+  if(class(model)[1]=='mcmc'){
+    stop('Only implemented for MAP models')
+  }
   samples = mvnfast::rmvn(n.samples,model$solutions,model$Cov)
 
   flagp = list(flagp)

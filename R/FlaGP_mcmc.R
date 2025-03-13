@@ -77,7 +77,7 @@ Metro_Hastings_Stochastic = function (flagp, li_func, pars, prop_sigma = NULL, p
       prop_sigma <- 1 + pars/2
     }
   }
-  prop_sigma <- makePositiveDefinite(prop_sigma)
+  prop_sigma <- MHadaptive::makePositiveDefinite(prop_sigma)
   mu <- pars
   pi_X <- li_func(pars, full=T, ...)
   k_X <- pars
@@ -88,7 +88,7 @@ Metro_Hastings_Stochastic = function (flagp, li_func, pars, prop_sigma = NULL, p
   eta = delta = list()
   for (i in 1:iterations) {
     # cat(i,' ')
-    k_Y <- mvrnorm(1, mu = k_X, Sigma = prop_sigma)
+    k_Y <- mvnfast::rmvn(1, mu = k_X, sigma = prop_sigma)
     # cat('prop:',round(k_Y,2),' ')
     pi_Y <- li_func(k_Y, full=T,...)
     # cat('prop llh:',round(pi_Y,2),' ')
@@ -126,7 +126,7 @@ Metro_Hastings_Stochastic = function (flagp, li_func, pars, prop_sigma = NULL, p
       x <- trace[len, ]
       N <- length(len)
       p_sigma <- (N - 1) * var(x)/N
-      p_sigma <- makePositiveDefinite(p_sigma)
+      p_sigma <- MHadaptive::makePositiveDefinite(p_sigma)
       if (!(0 %in% p_sigma))
         prop_sigma <- p_sigma
     }
