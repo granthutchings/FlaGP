@@ -16,6 +16,8 @@ flagp(
   center = T,
   scale = T,
   scaletype = "scalar",
+  X.min = NULL,
+  X.range = NULL,
   n.pc = NULL,
   pct.var = 0.95,
   B = NULL,
@@ -34,7 +36,8 @@ flagp(
   small = F,
   seed = NULL,
   verbose = T,
-  rsvd = F
+  rsvd = F,
+  nug.est = T
 )
 }
 \arguments{

@@ -10,7 +10,10 @@ fit_model = function(theta,ssq,flagp,
   eta = FlaGP:::fit_eta(theta,flagp,sample,end.eta,ssq.prior.params,map=map)
 
   if(flagp$bias){
-    delta = FlaGP:::fit_delta(eta$y.resid,flagp$basis$obs$D,flagp$XT.data,sample=sample,delta.method=delta.method,start=start.delta,end=end.delta,ssq.prior.params = ssq.prior.params,map=map)
+    y.resid = eta$y.resid
+    D = flagp$basis$obs$D
+    XT = flagp$XT.data
+    delta = FlaGP:::fit_delta(y.resid,D,XT,sample=sample,delta.method=delta.method,start=start.delta,end=end.delta,ssq.prior.params = ssq.prior.params,map=map)
   } else{
     delta = NULL
   }
@@ -35,7 +38,7 @@ fit_model = function(theta,ssq,flagp,
                 delta = delta))
   }
 }
-# wrapper function for fit model that has theta and ssq contained in the first argument
+# wrapper function for fit model that has theta and ssq contained in the first argument for use with optimization function
 fit_model_map = function(param,flagp,
                          end.eta=50,
                          delta.method='newGP',start.delta=6,end.delta=50,
@@ -43,6 +46,9 @@ fit_model_map = function(param,flagp,
                          ssq.prior='hcauchy',ssq.prior.params=c(.5)){
   theta = param[1:flagp$XT.data$p.t]
   ssq = param[flagp$XT.data$p.t+1]
+  if(!all(theta < 1 & theta > 0) | ssq<=0){
+    return(Inf) # minimization problem
+  }
   FlaGP:::fit_model(theta=theta,ssq=ssq,flagp=flagp,
                     lite=T,sample=F,
                     end.eta=end.eta,
@@ -53,6 +59,7 @@ fit_model_map = function(param,flagp,
 # fit modular emulator with t=theta
 fit_eta = function(theta,flagp,sample=T,end=50,ssq.prior.params,map)
 {
+
   n = flagp$Y.data$n
   n.pc = flagp$basis$sim$n.pc
   p.t = flagp$XT.data$p.t
@@ -93,14 +100,12 @@ fit_eta = function(theta,flagp,sample=T,end=50,ssq.prior.params,map)
   #   ssq.hat = (ssq.prior.params[2]+sum(rtr)/2)/(ssq.prior.params[1]+n.s2/2-1)
   # }
 
-  return(list(w=w,y.resid=y.resid))#,ssq.hat=ssq.hat))
+  return(list(w=w,y.resid=y.resid))#,ssq.hat=ssq.hat)))
 }
 # In mcmc we has previously recalculated the likelihood at the current theta to improve mixing.
 # This is cumbersome when all we really needed was to resample the emulator and discrepancy model
 resample_w = function(w,y.obs.trans,B.obs,ssq.prior.params){
-  # resample w
-  # w$sample = (rnorm(prod(dim(w$mean))) * sqrt(w$var)) + w$mean
-  w$sample = rt(prod(dim(w$mean)),w$df) * sqrt(w$var) + w$mean
+  w$sample = rt(prod(dim(w$mean)),w$df) * sqrt(w$scale) + w$mean
   y.pred = w_to_y(w$sample,B.obs)
   y.resid = y.obs.trans - y.pred
 
@@ -139,9 +144,8 @@ fit_delta = function(y.resid,D,XT.data,sample,delta.method,start,end,ssq.prior.p
   } else if(delta.method=='newGP'){       # use full GP for the bias model
     GPs = vector(mode='list',length=n.pc)
     mle = vector(mode='list',length=n.pc)
-    #v$var = list()
     for(k in 1:n.pc){
-      if(nrow(XT.data$obs$X$trans)>=5){
+      if(ncol(y.resid)>=5){
         # darg fails for one observation and generally these defaults don't seem to work well for small data problems
         d = laGP::darg(d=list(mle=T),X=XT.data$obs$X$trans)
         g = garg(g=list(mle=T),y=V.t[k,])
@@ -156,12 +160,6 @@ fit_delta = function(y.resid,D,XT.data,sample,delta.method,start,end,ssq.prior.p
       GPs[[k]] <- laGP::newGPsep(X=XT.data$obs$X$trans,
                              Z=V.t[k,],
                              d=d$start, g=g$start, dK=TRUE)
-      # I suspect that these ranges and priors are bad for small n
-      # cmle <- laGP::mleGPsep(GPs[[k]],
-      #                        param='d',
-      #                        tmin = d$min,
-      #                        tmax = d$max,
-      #                        ab=d$ab)
       cmle <- laGP::jmleGPsep(GPs[[k]],
                         drange=c(d$min, 10*d$max),
                         grange=c(g$min, g$max),
@@ -170,15 +168,12 @@ fit_delta = function(y.resid,D,XT.data,sample,delta.method,start,end,ssq.prior.p
       mle[[k]] = cmle
       pred = laGP::predGPsep(GPs[[k]], XX = XT.data$obs$X$trans, lite=T)
 
-      # v$mean = rbind(v$mean, pred$mean * V.t.sd + V.t.mean)
-      # v$var = rbind(v$var, pred$s2 / V.t.sd^2)
-
-      #v$var[[k]] = pred$Sigma
-      pred$s2[pred$s2<0]=0
       v$mean = rbind(v$mean, pred$mean)
-      v$var = rbind(v$var, pred$s2)
+      pred$s2[pred$s2<0]=0
+      v$var = rbind(v$var,pred$s2)
       laGP::deleteGPsep(GPs[[k]])
     }
+    v$scale = v$var*(v$df-2)/v$df # convert variance to scale of student t
     returns$mle=mle
   } else if(delta.method=='rgasp'){
     returns$model = vector(mode='list',length=n.pc)
@@ -190,7 +185,6 @@ fit_delta = function(y.resid,D,XT.data,sample,delta.method,start,end,ssq.prior.p
       v$var = rbind(v$var, pred$sd^2)
     }
   } else if(delta.method=='mlegp'){
-    # mlegp
     returns$model = vector(mode='list',length=n.pc)
     for(k in 1:n.pc){
       invisible(capture.output(returns$model[[k]] <- mlegp::mlegp(XT.data$obs$X$trans, V.t[k,],simplex.ntries = 1,verbose = 0, min.nugget = sqrt(.Machine$double.eps))))
@@ -200,7 +194,6 @@ fit_delta = function(y.resid,D,XT.data,sample,delta.method,start,end,ssq.prior.p
       v$var = rbind(v$var, t(pred$se.fit)^2)
     }
   } else if(delta.method=='homgp'){
-    # homgp
     returns$model = vector(mode='list',length=n.pc)
     for(k in 1:n.pc){
       returns$model[[k]] <- hetGP::mleHomGP(XT.data$obs$X$trans, V.t[k,])
@@ -216,7 +209,7 @@ fit_delta = function(y.resid,D,XT.data,sample,delta.method,start,end,ssq.prior.p
   if(sample){
     # sampling via cholesky where chol = sqrt(var)
     if(delta.method %in% c('lagp','newGP')){
-      v$sample = (rt(prod(dim(v$mean)),v$df) * sqrt(v$var)) + v$mean
+      v$sample = (rt(prod(dim(v$mean)),v$df) * sqrt(v$scale)) + v$mean
     } else{
       v$sample = (rnorm(prod(dim(v$mean))) * sqrt(v$var)) + v$mean
     }
@@ -240,22 +233,23 @@ fit_delta = function(y.resid,D,XT.data,sample,delta.method,start,end,ssq.prior.p
   returns$method = delta.method
   return(returns)
 }
-resample_v = function(v,y.resid,delta.method){##ssq.prior.params,delta.method){
+
+resample_v = function(delta,D,eta.y.resid){##ssq.prior.params,delta.method){
   # resample v
-  if(delta.method %in% c('lagp','newGP')){
-    v$sample = (rt(prod(dim(v$mean)),v$df) * sqrt(v$var)) + v$mean
+  if(delta$method %in% c('lagp','newGP')){
+    delta$v$sample = (rt(prod(dim(delta$v$mean)),delta$v$df) * sqrt(delta$v$scale)) + delta$v$mean
   } else{
-    v$sample = (rnorm(prod(dim(v$mean))) * sqrt(v$var)) + v$mean
+    delta$v$sample = (rnorm(prod(dim(delta$v$mean))) * sqrt(delta$v$var)) + delta$v$mean
   }
   # recompute residuals
-  y.resid = y.resid - w_to_y(v$sample,D)# + v$y.resid.mean)
+  delta$y.resid = eta.y.resid - w_to_y(delta$v$sample,D)# + v$y.resid.mean)
 
   # conjugate posterior
   # rtr = apply(y.resid,2,function(x) t(x) %*% x)
   # n.s2 = prod(dim(y.resid))
   # ssq.hat = invgamma::rinvgamma(1,ssq.prior.params[1]+n.s2/2,ssq.prior.params[2]+sum(rtr)/2)
 
-  return(list(v=v,y.resid=y.resid))#,ssq.hat=ssq.hat))
+  return(delta)#,ssq.hat=ssq.hat))
 }
 
 # FUNCTION: multivariate aGPsep for use with stretched and compressed inputs only
@@ -271,7 +265,7 @@ resample_v = function(v,y.resid,delta.method){##ssq.prior.params,delta.method){
 ## Returns:
 # lagp_fit: list of n.pc outputs from aGPsep
 # mean: matrix (n.pc x n) of prediction means
-# var: matrix (n.pc x n) of prediction variances
+# scale: matrix (n.pc x n) of prediction scale parameters (student t with end degrees of freedom)
 ## Calls:
 # aGPsep from laGP package
 # w_to_y to transform w -> y
@@ -280,14 +274,35 @@ resample_v = function(v,y.resid,delta.method){##ssq.prior.params,delta.method){
 # mv_calib.nobias: unbiased calibration
 # mv.em.pred: laGP emulator prediction function at new inputs
 }
-aGPsep_SC_mv = function(X, Z, XX, g, start=6, end=50, bias=F, sample=F, predvar=T){
+aGPsep_SC_mv = function(X, Z, XX, g, start=6, end=50, bias=F, sample=F, predvar=T, parallel = F){
+  select_maximin_subset_indices <- function(points, subset_size) {
+    n_points <- nrow(points)
 
+    if(subset_size > n_points){
+      stop("Subset size cannot exceed the number of available points.")
+    }
+
+    # Initialize with the first point
+    selected_indices <- c(1)
+    remaining_indices <- setdiff(1:n_points, selected_indices)
+
+    for(i in 2:subset_size){
+      # Compute the minimum distance of each remaining point to the selected points
+      min_distances <- sapply(remaining_indices, function(idx){
+        min(sqrt(rowSums((t(points[selected_indices, ]) - points[idx, ])^2)))
+      })
+
+      # Select the point with the maximum of these minimum distances
+      next_idx <- remaining_indices[which.max(min_distances)]
+      selected_indices <- c(selected_indices, next_idx)
+      remaining_indices <- setdiff(remaining_indices, next_idx)
+    }
+
+    return(selected_indices)
+  }
   n.pc = nrow(Z)
   n.XX = ifelse(bias,nrow(XX),nrow(XX[[1]]))
-  # p.t = ifelse(bias,ncol(XX),ncol(XX[[1]]))
-  mean = array(dim=c(n.pc,n.XX))
-  var = array(dim=c(n.pc,n.XX))
-
+  mean = scale = krigvar = array(dim=c(n.pc,n.XX))
   if(bias){
     # if we use laGP for the bias, we cannot use stretched an compressed inputs anymore so default to alc criterion
     lagp_fit = lapply(1:n.pc,function(i) laGP::aGPsep(X = X,
@@ -297,6 +312,7 @@ aGPsep_SC_mv = function(X, Z, XX, g, start=6, end=50, bias=F, sample=F, predvar=
                                                 end = min(end,ncol(Z)-1),
                                                 method = 'alc',
                                                 verb=0))
+    # TODO: I don't think this is working, we need to take the results from lagp_fit and make a mean/scale matrix
   } else{
     # SUPER SLOW
     # lagp_pred = lapply(1:n.pc, function(i) laGP::aGPsep(X[[i]],Z[i,],XX[[i]],method = 'nn',d=list(start=1,mle=F),g=g,verb = F,end = end))
@@ -314,7 +330,7 @@ aGPsep_SC_mv = function(X, Z, XX, g, start=6, end=50, bias=F, sample=F, predvar=
       for(j in 1:n.XX){
         for(i in 1:n.pc){
           GP = GP_fit_isotropic(rbind(X[[i]][nn.indx[[i]][j,],],XX[[i]][j,]),
-                                d=1,g,lite=T)
+                                d=1,g[i],lite=T)
           tKchol = t(GP$Kchol)
           # cross-cov: K[end+1,1:end]
           # train-cov: K[1:end,1:end]
@@ -324,43 +340,75 @@ aGPsep_SC_mv = function(X, Z, XX, g, start=6, end=50, bias=F, sample=F, predvar=
         }
       }
     } else{
-      for(j in 1:n.XX){
-        # This is surprisingly slow, maybe there is a better way to do prediction
-        # lagp_fit = lapply(1:n.pc,function(i) laGP::newGP(
-        #   X = X[[i]][nn.indx[[i]][j,],,drop=F],
-        #   Z = Z[i,nn.indx[[i]][j,]],
-        #   d = 1,
-        #   g = g))
-        # lagp_pred = lapply(1:n.pc,function(i) laGP::predGP(lagp_fit[[i]],XX[[i]][j,,drop=F],lite=T))
-        for(i in 1:n.pc){
-          lagp_fit = GP_fit_isotropic(X[[i]][nn.indx[[i]][j,],,drop=F],
-                                      d=1,g,
-                                      Z[i,nn.indx[[i]][j,]],
-                                      lite=F)
-          lagp_pred = GP_predict(lagp_fit,
-                                 X[[i]][nn.indx[[i]][j,],,drop=F],
-                                 XX[[i]][j,,drop=F],
-                                 Z[i,nn.indx[[i]][j,]],
-                                 predvar=T)
-          mean[i,j] = lagp_pred$mean
-          var[i,j] = lagp_pred$s2
+      if(parallel){
+        Xadd = NULL
+        parallel_pred = function(i){
+          MVK = array(dim=c(1,n.XX,3))
+          for(j in 1:n.XX){
+            lagp_fit = GP_fit_isotropic(rbind(X[[i]][nn.indx[[i]][j,],,drop=F],X[[i]][Xadd[[i]],]),
+                             d=1,g[i],
+                             c(Z[i,nn.indx[[i]][j,]],Z[i,Xadd[[i]]]),
+                             lite=F)
+            lagp_pred = GP_predict(lagp_fit,
+                                   rbind(X[[i]][nn.indx[[i]][j,],,drop=F],X[[i]][Xadd[[i]],]),
+                                   XX[[i]][j,,drop=F],
+                                   c(Z[i,nn.indx[[i]][j,]],Z[i,Xadd[[i]]]),
+                                   predvar=T)
+            MVK[1,j,1] = lagp_pred$mean
+            MVK[1,j,2] = lagp_pred$s2
+            MVK[1,j,3] = lagp_pred$krigvar
+          }
+          return(MVK)
+        }
+        combine_matrices <- function(x, y) {
+          abind::abind(x, y, along = 1)  # Stack along the third dimension
+        }
+        MVK = foreach::foreach(i=1:n.pc,.combine = combine_matrices) %dopar% parallel_pred(i)
+        mean = MVK[,,1]
+        scale = MVK[,,2]
+        krigvar = MVK[,,3]
+      } else{
+        for(j in 1:n.XX){
+          # This is surprisingly slow, maybe there is a better way to do prediction
+          # lagp_fit = lapply(1:n.pc,function(i) laGP::newGP(
+          #   X = X[[i]][nn.indx[[i]][j,],,drop=F],
+          #   Z = Z[i,nn.indx[[i]][j,]],
+          #   d = 1,
+          #   g = g))
+          # lagp_pred = lapply(1:n.pc,function(i) laGP::predGP(lagp_fit[[i]],XX[[i]][j,,drop=F],lite=T))
+          # Adding a few far away points can be helpful
+          # Xadd = lapply(1:n.pc, function(i) sample(1:nrow(X[[i]]),10,F))
+          Xadd = NULL
+
+          for(i in 1:n.pc){
+            lagp_fit = GP_fit_isotropic(rbind(X[[i]][nn.indx[[i]][j,],,drop=F],X[[i]][Xadd[[i]],]),
+                                             d=1,g[i],
+                                             c(Z[i,nn.indx[[i]][j,]],Z[i,Xadd[[i]]]),
+                                             lite=F)
+            lagp_pred = GP_predict(lagp_fit,
+                                        rbind(X[[i]][nn.indx[[i]][j,],,drop=F],X[[i]][Xadd[[i]],]),
+                                        XX[[i]][j,,drop=F],
+                                        c(Z[i,nn.indx[[i]][j,]],Z[i,Xadd[[i]]]),
+                                        predvar=T)
+            mean[i,j] = lagp_pred$mean
+            scale[i,j] = lagp_pred$s2
+            krigvar[i,j] = lagp_pred$krigvar
+          }
         }
       }
     }
   }
   # small nuggets can result in negative variances from laGP.
   if(predvar)
-    var[var<0] = 0
+    scale[scale<0] = 0
 
   if(sample & predvar){
-    # sampling via cholesky where chol = sqrt(var)
-    # sample = (rnorm(prod(dim(mean))) * sqrt(var)) + mean
-    sample = (rt(prod(dim(mean)),end) * sqrt(var)) + mean
+    sample = (rt(prod(dim(mean)),end) * sqrt(scale)) + mean
   } else{
     sample = mean
   }
   if(predvar){
-    return(list(mean=mean,var=var,sample=sample,df=end))
+    return(list(mean=mean,scale=scale,var=scale*end/(end-2),krigvar=krigvar,sample=sample,df=end))
   } else{
     return(list(mean=mean,sample=sample,df=end))
   }
@@ -383,7 +431,7 @@ garg = function(g, y){
 
   ## check for starting value
   # added that g$start >= sqrt(.Machine$double.eps) because that's the min, and there will be an error if start<min
-  if(is.null(g$start)) g$start <- max(sqrt(.Machine$double.eps),as.numeric(quantile(r2s, p=0.025)))
+  if(is.null(g$start)) g$start <- min(g$max-1e-12,max(sqrt(.Machine$double.eps),as.numeric(quantile(r2s, p=0.025))))
   ## check for max value
   if(is.null(g$max)) {
     if(g$mle) g$max <- max(r2s)
@@ -404,6 +452,6 @@ garg = function(g, y){
   }
 
   ## now check the validity of the values, and return
-  laGP:::check.arg(g)
+  # laGP:::check.arg(g)
   return(g)
 }

@@ -20,10 +20,16 @@
   return.delta = F,
   y = T,
   native = T,
-  conf.int = F,
+  y.conf.int = F,
   resid.error = F,
-  predvar = T,
-  verbose = T
+  w.var = T,
+  y.var = F,
+  verbose = T,
+  alpha = 0.05,
+  X01 = F,
+  n.pc = flagp$basis$sim$n.pc,
+  parallel = F,
+  make.cluster = F
 )
 }
 \arguments{
@@ -57,7 +63,17 @@
 
 \item{native}{return y predictions on native scale}
 
-\item{conf.int}{return 95\% confidence interval for predictions}
+\item{y.conf.int}{return 95\% confidence interval for predictions}
+
+\item{resid.error}{add residual standard error to predictions}
+
+\item{w.var}{compute prediction variance in PC space}
+
+\item{y.var}{compute prediction variance in y space}
+
+\item{verbose}{print some information}
+
+\item{alpha}{confidence level for confidence intervals}
 }
 \description{
 Prediction with \code{mcmc} or \code{map} object

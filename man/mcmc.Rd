@@ -8,10 +8,10 @@ mcmc(
   flagp,
   t.init = rep(0.5, flagp$XT.data$p.t),
   ssq.init = 0.01,
-  prop.cov = diag((0.5/3)^2, flagp$XT.data$p.t + 1),
+  prop.cov = diag(c(rep(0.005, flagp$XT.data$p.t), 1e-06), flagp$XT.data$p.t + 1),
   n.samples = 10000,
   n.burn = 1000,
-  adapt.par = c(100, 50, 50, 1000),
+  adapt.par = c(100, 50, 0.5, n.burn),
   end.eta = 50,
   delta.method = "newGP",
   start.delta = 6,
@@ -19,7 +19,7 @@ mcmc(
   theta.prior = "beta",
   theta.prior.params = c(2, 2),
   ssq.prior = "hcauchy",
-  ssq.prior.params = c(0.5),
+  ssq.prior.params = c(0.1),
   prev.samples = NULL,
   recalc.llh = F,
   sample = as.logical(ifelse(flagp$bias, F, T)),
@@ -35,7 +35,7 @@ mcmc(
 
 \item{n.burn}{integer number of initial samples to discard}
 
-\item{adapt.par}{vector of parameters for addaptive metropolis. The first parameter it the first iteration to begin adaptation, the second is the frequency of adaptation, the third is the number of past samples to include for adaptation, and the fourth is the iteration to stop adaptation.}
+\item{adapt.par}{vector of parameters for addaptive metropolis. The first parameter it the first iteration to begin adaptation, the second is the frequency of adaptation, the third is the proportion of past samples to include for adaptation, and the fourth is the iteration to stop adaptation.}
 
 \item{end.eta}{integer number of neighbors to use for laGP emulator}
 

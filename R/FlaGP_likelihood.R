@@ -3,6 +3,8 @@
 compute_ll = function(theta,ssq,eta,delta,sample,flagp,
                       theta.prior,theta.prior.params,
                       ssq.prior,ssq.prior.params){
+  ll = list()
+
   if(!is.null(delta)){
     # ssq.hat = delta$ssq.hat
     y.resid = delta$y.resid
@@ -43,12 +45,13 @@ compute_ll = function(theta,ssq,eta,delta,sample,flagp,
       v.scale.adjust = NULL
     }
     SigB.hat = lapply(1:flagp$Y.data$n, function(i) as.matrix(diag(c(w.scale.adjust*eta$w$var[,i],v.scale.adjust*delta$v$var[,i]),nrow=length(c(eta$w$var[,i],delta$v$var[,i]))) + ssq*flagp$precomp$BDtBDinv))
-    # l_beta_hat = sapply(1:flagp$Y.data$n, function(i) mvtnorm::dmvnorm(x=as.numeric(B.hat[,i]),sigma = SigB.hat[[i]], log = T))
+    # l_beta_hat = sapply(1:flagp$Y.data$n, function(i) mvtnorm::dmvnorm(x=as.numeric(B.hat[,i]),sigma = SigB.hat, log = T))
     mu = rep(0,nrow(B.hat))
     l_beta_hat = sapply(1:flagp$Y.data$n, function(i) mvnfast::dmvn(X=as.numeric(B.hat[,i]),mu=mu,sigma = SigB.hat[[i]], log = T))
     ll = sapply(1:flagp$Y.data$n, function(i) -.5*((flagp$Y.data$obs$n.y-flagp$precomp$rankBD)*log(2*pi*ssq) + flagp$precomp$ldetBDtBD +
-                                        lambda*yLLHmaty[i]) + l_beta_hat[i])
+                                                     lambda*yLLHmaty[i]) + l_beta_hat[i])
   }
+
   if(theta.prior=='beta'){
     p.theta = sum(dbeta(theta,theta.prior.params[1],theta.prior.params[2],log=T))
   } else if(theta.prior=='unif'){
@@ -60,5 +63,5 @@ compute_ll = function(theta,ssq,eta,delta,sample,flagp,
     # half cauchy
     p.ssq = LaplacesDemon::dhalfcauchy(ssq,ssq.prior.params[1],log=T)
   }
-  return(sum(ll) + p.theta + p.ssq)
+  return(sum(unlist(ll)) + p.theta + p.ssq)
 }

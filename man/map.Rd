@@ -18,7 +18,7 @@ map(
   theta.prior = "beta",
   theta.prior.params = c(2, 2),
   ssq.prior = "hcauchy",
-  ssq.prior.params = c(0.5)
+  ssq.prior.params = c(0.1)
 )
 }
 \arguments{

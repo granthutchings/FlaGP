@@ -2,7 +2,7 @@ mcmc_mh = function(flagp,
                    t.init=rep(.5,flagp$XT.data$p.t),
                    ssq.init=.01,
                    prop.cov=diag((.5/3)^2,flagp$XT.data$p.t+1),
-                   n.samples=10000,n.burn=1000,
+                   n.samples=10000,n.burn=1000,thin=1,
                    adapt.par = c(100,50,.5,1000),
                    end.eta=50,
                    delta.method='newGP',start.delta=6,end.delta=50,
@@ -12,24 +12,217 @@ mcmc_mh = function(flagp,
                    recalc.llh=F,
                    sample=as.logical(ifelse(flagp$bias,F,T)),
                    verbose=T){
-  llh = function(par,...){
+  llh = function(par,full=F,opt=F,...){
     t.curr = par[1:flagp$XT.data$p.t]
     ssq.curr = par[flagp$XT.data$p.t+1]
     if(ssq.curr<0 | any(t.curr<0) | any(t.curr>1)){
-      return(-Inf)
+      if(full){
+        return(list(ll=-Inf))
+      } else{
+        return(-Inf)
+      }
     }
-    llt = fit_model(t.curr,ssq.curr,flagp,F,sample,end.eta,delta.method,start.delta,end.delta,F,
-                    theta.prior,theta.prior.params,ssq.prior,ssq.prior.params)
-    llt$ll
+    if(opt){
+      llt = fit_model(t.curr,ssq.curr,flagp,F,F,end.eta,delta.method,start.delta,end.delta,F,
+                      theta.prior,theta.prior.params,ssq.prior,ssq.prior.params)
+    } else{
+      llt = fit_model(t.curr,ssq.curr,flagp,F,sample,end.eta,delta.method,start.delta,end.delta,F,
+                      theta.prior,theta.prior.params,ssq.prior,ssq.prior.params)
+    }
+
+    if(full){
+      return(llt)
+    } else{
+      return(llt$ll)
+    }
   }
   adapt.par[4] = adapt.par[4]/n.samples
   if(recalc.llh){
-    Metro_Hastings_Stochastic(llh,c(t.init,ssq.init),prop.cov,NULL,n.samples,n.burn,adapt.par,F)
+    flagp$prior = list(delta.method=delta.method,start.delta=start.delta,end.delta=end.delta,
+                       theta.prior=theta.prior,theta.prior.params=theta.prior.params,
+                       ssq.prior=ssq.prior,ssq.prior.params=ssq.prior.params)
+    Metro_Hastings_Stochastic(flagp,llh,c(t.init,ssq.init),prop.cov,NULL,n.samples,n.burn,thin,adapt.par,recalc.llh,!verbose)
   } else{
-    MHadaptive::Metro_Hastings(llh,c(t.init,ssq.init),prop.cov,NULL,n.samples,n.burn,adapt.par,F)
+    # MHadaptive::Metro_Hastings(llh,c(t.init,ssq.init),prop.cov,NULL,n.samples,n.burn,adapt.par,!verbose)
+    flagp$prior = list(delta.method=delta.method,start.delta=start.delta,end.delta=end.delta,
+                       theta.prior=theta.prior,theta.prior.params=theta.prior.params,
+                       ssq.prior=ssq.prior,ssq.prior.params=ssq.prior.params)
+    Metro_Hastings_Stochastic(flagp,llh,c(t.init,ssq.init),prop.cov,NULL,n.samples,n.burn,thin,adapt.par,recalc.llh,!verbose)
   }
 }
+# addapted MHadaptive::Metro_Hastings for stochastic llh and fast resampling of llh
+Metro_Hastings_Stochastic = function (flagp, li_func, pars, prop_sigma = NULL, par_names = NULL,
+                                      iterations = 50000, burn_in = 1000, thin = 1, adapt_par = c(100, 20, 0.5, 0.75), recalc = TRUE, quiet = FALSE, ...)
+{
+  ptm = proc.time()[3]
+  sample = as.logical(ifelse(flagp$bias,F,T))
+  if (!is.finite(li_func(pars, ...)))
+    stop("Seed parameter values <pars> are not in the defined parameter space.  Try new starting values for <pars>.")
+  if (is.null(par_names))
+    par_names <- letters[1:length(pars)]
+  if (!is.null(dim(prop_sigma))) {
+    if ((dim(prop_sigma)[1] != length(pars) || dim(prop_sigma)[2] !=
+         length(pars)) && !is.null(prop_sigma))
+      stop("prop_sigma not of dimension length(pars) x length(pars)")
+  }
+  if (is.null(prop_sigma)) {
+    if (length(pars) != 1) {
+      fit <- optim(pars, li_func, control = list(fnscale = -1),
+                   hessian = TRUE, opt=T,...)
+      fisher_info <- solve(-fit$hessian)
+      prop_sigma <- sqrt(diag(fisher_info))
+      prop_sigma <- diag(prop_sigma)
+    }
+    else {
+      prop_sigma <- 1 + pars/2
+    }
+  }
+  prop_sigma <- makePositiveDefinite(prop_sigma)
+  mu <- pars
+  pi_X <- li_func(pars, full=T, ...)
+  k_X <- pars
+  trace <- array(dim = c(iterations, length(pars)))
+  llh = array(dim = iterations)
+  accept = numeric(iterations)
+  announce <- floor(seq(iterations/10, iterations, length.out = 10))
+  eta = delta = list()
+  for (i in 1:iterations) {
+    # cat(i,' ')
+    k_Y <- mvrnorm(1, mu = k_X, Sigma = prop_sigma)
+    # cat('prop:',round(k_Y,2),' ')
+    pi_Y <- li_func(k_Y, full=T,...)
+    # cat('prop llh:',round(pi_Y,2),' ')
+    a_X_Y = (pi_Y$ll) - (pi_X$ll)
+    if (is.nan(a_X_Y))
+      a_X_Y <- -Inf
+    if (log(runif(1, 0, 1)) <= a_X_Y) {
+      k_X = k_Y
+      # cat('cur:',round(k_X,2),' ')
+      pi_X = pi_Y
+      accept[i] = 1
+    } else{
+      # if not accept recalc current state due to stochastic llh function
+      # cat('cur:',round(k_X,2),' ')
+      # pi_X = li_func(k_X, full=T,...)
+      # resample w,v much faster than recalculating llh
+      if(recalc){
+        pi_X$eta = resample_w(pi_X$eta$w,flagp$Y.data$obs$trans,flagp$basis$obs$B,flagp$prior$ssq.prior.params)
+        if(flagp$bias){
+          pi_X$delta = resample_v(pi_X$delta,flagp$basis$obs$D,pi_X$eta$y.resid)
+        }
+        pi_X$ll = compute_ll(pi_X$theta,pi_X$ssq,pi_X$eta,pi_X$delta,sample,flagp,
+                             flagp$prior$theta.prior,flagp$prior$theta.prior.params,flagp$prior$ssq.prior,flagp$prior$ssq.prior.params)
+      }
+      # if(sample.type=='logit')
+      # pi_X$ll = pi_X$ll + logit.jacobian(t.curr) + log.jacobian(ssq.curr)
+    }
+    # cat('cur llh:',round(pi_X,2),'\n ')
+    trace[i, ] <- k_X
+    llh[i] = pi_X$ll
+    eta[[i]] = pi_X$eta
+    delta[[i]] = pi_X$delta
+    if (i > adapt_par[1] && i%%adapt_par[2] == 0 && i < (adapt_par[4] * iterations)) {
+      len <- floor(i * adapt_par[3]):i
+      x <- trace[len, ]
+      N <- length(len)
+      p_sigma <- (N - 1) * var(x)/N
+      p_sigma <- makePositiveDefinite(p_sigma)
+      if (!(0 %in% p_sigma))
+        prop_sigma <- p_sigma
+    }
+    if (!quiet && i %in% announce)
+      print(paste("updating: ", i/iterations * 100, "%",
+                  sep = ""))
+    # if(i %% 10 == 0){save(trace,file='~/fuelsgen/examples/LGCP/tmp.RData')}
+  }
+  keep = seq(burn_in,iterations,thin)
+  trace_all = trace
+  trace <- trace[keep, ]
+  llh = llh[keep]
+  eta = eta[keep]
+  delta = delta[keep]
+  # if (length(pars) > 1) {
+  #   theta_bar <- sapply(1:length(pars), function(x) {
+  #     mean(trace[, x])
+  #   })
+  # }
+  # else theta_bar <- mean(trace)
+  accept_rate = mean(accept[burn_in:iterations])
+  val <- list(t.samp = trace[,1:length(pars)-1,drop=F],ssq.samp=trace[,length(pars)], ll.samp = llh,
+              eta = eta, delta = delta,
+              prop.cov = prop_sigma, par_names = par_names,
+              acpt.ratio = accept_rate, time=proc.time()[3]-ptm,n.samples=iterations,n.burn=burn_in,samp.all = trace_all)
+  class(val) <- c("mcmc","list")
+  return(val)
+}
 
+mcmc_ld = function(flagp,
+                   t.init=rep(.5,flagp$num$p.t),
+                   ssq.init=.01,
+                   prop.cov=diag((.5/3)^2,flagp$num$p.t+1),
+                   n.samples=10000,n.burn=1000,thin=1,
+                   adapt.par = c(100,50,.5,1000),
+                   end.eta=50,
+                   delta.method='newGP',start.delta=6,end.delta=50,
+                   theta.prior='beta',theta.prior.params=c(2,2),
+                   ssq.prior='hcauchy',ssq.prior.params=c(.5),
+                   sample=as.logical(ifelse(flagp$bias,F,T)),
+                   verbose=T,algorithm='ram'){
+  MyData = list(flagp = flagp,
+              t.init = t.init,
+              ssq.init = ssq.init,
+              prop.cov = prop.cov,
+              n.samples = n.samples,
+              adapt.par = adapt.par,
+              end.eta = end.eta,
+              delta.method = delta.method,
+              start.delta = start.delta,
+              end.delta = end.delta,
+              theta.prior = theta.prior,
+              theta.prior.params = theta.prior.params,
+              ssq.prior = ssq.prior,
+              ssq.prior.params = ssq.prior.params,
+              sample = sample,
+              verbose = verbose)
+  MyData$mon.names = "LP"
+  parm.names <- LaplacesDemon::as.parm.names(list(theta=rep(0,flagp$num$p.t), sigma2=0))
+  MyData$parm.names = parm.names
+  # pos.theta <- grep("theta", parm.names)
+  # pos.sigma2 <- grep("sigma2", parm.names)
+  # MyData$pos.beta = pos.theta
+  # MyData$pos.sigma = pos.sigma2
+  MyData$N = flagp$Y.data$m
+  stopifnot(LaplacesDemon::is.data(MyData))
+  Model = function(parm, Data){
+
+    t.curr = parm[1:Data$flagp$num$p.t]
+    ssq.curr = parm[Data$flagp$num$p.t+1]
+    if(ssq.curr<0 | any(t.curr<0) | any(t.curr>1)){
+      llt = list(ll=-Inf)
+    } else{
+      llt = fit_model(t.curr,ssq.curr,Data$flagp,F,Data$sample,Data$end.eta,Data$delta.method,Data$start.delta,Data$end.delta,F,
+                      Data$theta.prior,Data$theta.prior.params,Data$ssq.prior,Data$ssq.prior.params)
+    }
+    LP = llt$ll
+    Modelout = list(LP=LP,Dev=-2*LP,Monitor=LP,yhat=llt$eta$y.resid,parm=parm)
+    return(Modelout)
+  }
+  if(algorithm=='ram'){
+    trace(LaplacesDemon::LaplacesDemon, edit = T)
+    Fit = LaplacesDemon::LaplacesDemon(Model, Data=MyData, Initial.Values = c(t.init,ssq.init),
+                                       Covar=NULL, Iterations=MyData$n.samples, Status=100, Thinning=thin,
+                                       Algorithm="RAM", Specs=list(alpha.star=0.234, B=NULL, Dist="N",
+                                                                   gamma=0.66, n=0))
+  } else if(algorithm=='ess'){
+    Fit = LaplacesDemon::LaplacesDemon(Model, Data=MyData, Initial.Values = c(t.init,ssq.init),
+                                       Covar=NULL, Iterations=MyData$n.samples, Status=1000, Thinning=thin,
+                                       Algorithm="ESS", Specs=list(B=NULL), Debug = list(DB.Model=FALSE))
+  } else{
+    stop('Algorithm not implemented.')
+  }
+
+  return(Fit)
+}
 #' @title FlaGP MCMC with joint proposal
 #'
 #' @description Addaptive MCMC as defined in Haario et al. 2001 - "An adaptive Metropolis algorithm"
@@ -58,13 +251,13 @@ mcmc_mh = function(flagp,
 mcmc = function(flagp,
                 t.init=rep(.5,flagp$XT.data$p.t),
                 ssq.init=.01,
-                prop.cov=diag((.5/3)^2,flagp$XT.data$p.t+1),
+                prop.cov=diag(c(rep(.005,flagp$XT.data$p.t),1e-6),flagp$XT.data$p.t+1),
                 n.samples=10000,n.burn=1000,
-                adapt.par = c(100,50,.5,1000),
+                adapt.par = c(100,50,.5,n.burn),
                 end.eta=50,
                 delta.method='newGP',start.delta=6,end.delta=50,
                 theta.prior='beta',theta.prior.params=c(2,2),
-                ssq.prior='hcauchy',ssq.prior.params=c(.5),
+                ssq.prior='hcauchy',ssq.prior.params=c(.1),
                 prev.samples=NULL,
                 recalc.llh=F,
                 sample=as.logical(ifelse(flagp$bias,F,T)),
@@ -89,7 +282,7 @@ mcmc = function(flagp,
   ll.prop = list()
 
   # Storage
-  t.store = matrix(nrow=n.samples,ncol=flagp$XT.data$p.t)
+  t.store = matrix(nrow=n.samples,ncol=flagp$num$p.t)
   ssq.store = numeric(n.samples)
   eta.store = vector(mode='list',length=n.samples)
   if(bias){

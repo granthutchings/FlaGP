@@ -47,10 +47,10 @@ get_basis = function(Y, n.pc = NULL, pct.var = .95, full.basis=F, B=NULL, V.t = 
     return.list$B = svdY$u %*% diag(svdY$d) / sqrt(nExp)
     return.list$V.t = t(svdY$v) * sqrt(nExp)
 
-    # Return only the required number of basis vectors
+    # use percent variance if n.pc is not supplied
     percent.variance = zapsmall((svdY$d^2) / sum(svdY$d^2))
-    if(!is.null(pct.var) & is.null(n.pc)){
-      # percentage of variance explained specified
+    if(is.null(n.pc)){
+      # Return only the required number of basis vectors to reach pct.var
       n.pc = which.max(cumsum(percent.variance)>=pct.var)
     }
 
@@ -70,7 +70,11 @@ get_basis = function(Y, n.pc = NULL, pct.var = .95, full.basis=F, B=NULL, V.t = 
     return.list$n.pc = ncol(B)
     return.list$V.t = V.t
     if(is.null(V.t))
-      return.list$V.t = solve(t(B)%*%B)%*%t(B)%*%Y
+      if(all(dim(B)==c(1,1))){ # scalar response
+        return.list$V.t = t(Y)
+      } else{
+        return.list$V.t = tcrossprod(solve(crossprod(B)),B)%*%Y
+      }
   }
 
   if(bias & is.null(D)){
@@ -139,15 +143,37 @@ get_obs_basis = function(sim.basis,Y.obs,y.ind.sim,y.ind.obs,sigma.y=NULL){
   }
   return(obs.basis)
 }
+get_ls_fisher = function(XT,V.t,d,g,K,i){
+  llh = function(pars){
+    d = pars[1:ncol(XT)]
+    g = pars[ncol(XT)+1]
+    GP = FlaGP:::GP_fit_isotropic(XT,d,g,V.t,F)
 
-# FUNCTION: mv_lengthscales
-# TO DO: this function needs to be updated for only using a subset of the data
-### Computes estimated length scale parameters for use in stretching and compressing the inputs space
-# Parameters:
-# X (numeric) : untransformed matrix of inputs
-# V.t (numeric) : matrix
-# ls_prior_ab (numeric) : 2 vector of parameters for gamma prior on length-scales
-mv_lengthscales = function(XT,p.x,p.t,V.t,g,subsample,m,K,seed,ls.prior,ls.parallel,make.cluster,ls.subsample.size,verbose){
+    # proportional to likelihood calculation
+    llik = 0.0 - 0.5*(nrow(XT) * log(0.5 * GP$phi) + determinant(GP$K)$modulus)
+
+    # if priors are being used; for lengthscale */
+    # if(gp->d > 0 && dab && dab[0] > 0 && dab[1] > 0)
+    #   llik += dgamma(gp->d, dab[0], 1.0/dab[1], 1);
+
+    # if priors are being used; for nugget */
+    # if(gp->g > 0 && gab && gab[0] > 0 && gab[1] > 0)
+    #   llik += dgamma(gp->g, gab[0], 1.0/gab[1], 1);
+
+    # grad is gradient
+    # info is fisher information matrix
+    return(list(loglik=llik,grad=grad,info=info))
+  }
+  start = c(1,1,g)
+  # fit=GpGp::fit_model(V.t,XT,X,
+  #                     NNarray=NNarray,m_seq=nrow(XT)-1,convtol=tol,
+  #                     start_parms=cur.parms,max_iter=32,
+  #                     covfun_name='matern35_scaledim',silent=(print.level<2),
+  #                     reorder=FALSE,fixed_parms=fixed)
+  fit = fisher_scoring(llh,start,link = log)
+  return(fit)
+}
+mv_lengthscales_fisher = function(XT,p.x,p.t,V.t,g,subsample,m,K,seed,ls.prior,ls.parallel,make.cluster,ls.subsample.size,verbose){
   ptm = proc.time()[3]
   n.pc = nrow(V.t)
   dConfig = laGP::darg(NULL,XT)
@@ -167,14 +193,14 @@ mv_lengthscales = function(XT,p.x,p.t,V.t,g,subsample,m,K,seed,ls.prior,ls.paral
 
     if(ls.parallel & n.pc>1){
       tryCatch({
-        estLenscales = foreach::foreach(i=1:n.pc) %dopar% blhs.loop.lite(y=V.t[i,],X=XT,m=m,K=K,da=dConfig,g=g)
+        estLenscales = foreach::foreach(i=1:n.pc) %dopar% blhs.loop.lite(y=V.t[i,],X=XT,m=m,K=K,da=dConfig,g=g,ga=gConfig[[i]],nug.est = nug.est)
       },error=function(e){
         if(make.cluster)
           parallel::stopCluster(cl)
         stop("\nError in parallel processing. This could be due to a memory issue.\nTry ls.parallel=F. This will be slower because the estimation will be done in serial. If that does not work, try ls.subsample='strat' or 'rand' for stratified or simple random sampling with ls.subsample.size<m.\n")
       })
     } else{
-      estLenscales = lapply(1:n.pc, function(i) blhs.loop.lite(y=V.t[i,],X=XT,m=m,K=K,da=dConfig,g=g))
+      estLenscales = lapply(1:n.pc, function(i) blhs.loop.lite(y=V.t[i,],X=XT,m=m,K=K,da=dConfig,g=g,ga=gConfig[[i]],nug.est = nug.est))
     }
   } else{
     if(subsample=='strat' & ls.subsample.size<nrow(XT)){
@@ -192,31 +218,13 @@ mv_lengthscales = function(XT,p.x,p.t,V.t,g,subsample,m,K,seed,ls.prior,ls.paral
       samp.id = list(1:nrow(XT))
       sample.time = 0
     }
-    get_ls = function(XT,V.t,d,g,K,i){
-      gp = laGP::newGPsep(X = XT,Z = V.t,d = d$start,g = g,dK = TRUE)
-      mle = list(conv=1)
-      i = 0
-      maxit=100
-      while(mle$conv==1 & i<=1000){
-        mle = laGP::mleGPsep(gp,
-                             param='d',
-                             tmin = d$min,
-                             tmax = 10*d$max,
-                             ab=d$ab,
-                             maxit=maxit)
-        i = i+maxit
-        if(mle$conv==1){
-          message(paste('Warning: mleGPsep for bootstrap replicate',K,'and basis component',i,'has not converged after',i*100,'iterations.'))
-        }
-      }
-      return(mle$d)
-    }
+
     tmp.ls = array(dim=c(n.pc,ncol(XT),K))
     for(k in 1:K){
       if(ls.parallel){
-        tmp.ls[,,k] = foreach::foreach(i=1:n.pc,.combine='rbind') %dopar% get_ls(XT[samp.id[[k]],],V.t[i,samp.id[[k]]],dConfig,g,k,i)
+        tmp.ls[,,k] = foreach::foreach(i=1:n.pc,.combine='rbind') %dopar% get_ls_fisher(XT[samp.id[[k]],],V.t[i,samp.id[[k]]],dConfig,g,k,i)
       } else{
-        tmp.ls[,,k] = t(sapply(1:n.pc, function(i) get_ls(XT[samp.id[[k]],,drop=F],V.t[i,samp.id[[k]]],dConfig,g,k,i)))
+        tmp.ls[,,k] = t(sapply(1:n.pc, function(i) get_ls_fisher(XT[samp.id[[k]],,drop=F],V.t[i,samp.id[[k]]],dConfig,g,k,i)))
         ##### DEV #####
         # try using mlegp - didn't seem to change much
         # tmp.ls[,,k] = t(sapply(1:n.pc, function(i) 1/nugget=g,nugget.known=1,verbose=0,simplex.ntries = 1)$beta))
@@ -256,6 +264,162 @@ mv_lengthscales = function(XT,p.x,p.t,V.t,g,subsample,m,K,seed,ls.prior,ls.paral
   return(return)
 }
 
+# FUNCTION: mv_lengthscales
+# TO DO: this function needs to be updated for only using a subset of the data
+### Computes estimated length scale parameters for use in stretching and compressing the inputs space
+# Parameters:
+# X (numeric) : untransformed matrix of inputs
+# V.t (numeric) : matrix
+# ls_prior_ab (numeric) : 2 vector of parameters for gamma prior on length-scales
+mv_lengthscales = function(XT,p.x,p.t,V.t,g,subsample,m,K,seed,ls.prior,ls.parallel,make.cluster,ls.subsample.size,nug.est,verbose){
+  ptm = proc.time()[3]
+  n.pc = nrow(V.t)
+  dConfig = laGP::darg(NULL,XT)
+  if(nug.est){
+    gConfig = lapply(1:n.pc, function(i) FlaGP:::garg(list(mle=TRUE,start=g,min=1e-12,max=1e-4,ab=c(0,0)),V.t[i,]))
+  } else{
+    gConfig = lapply(1:n.pc, function(i) list(start=g))
+  }
+  if(!ls.prior){dConfig$ab = c(0,0)}
+  if(n.pc>1 & ls.parallel & make.cluster){
+    cl = parallel::makeCluster(min(n.pc,parallel::detectCores()-1))
+    doParallel::registerDoParallel(cl)
+  }
+  if(!is.null(seed)){
+    set.seed(seed)
+  }
+  if(subsample=='blhs'){
+    # check size of m
+    m.max = ncol(V.t)^(1/(ncol(XT)-1))
+    if(m>m.max)
+      stop(paste0('Must have ls.m < ',m.max,'. See documentation for laGP::blhs()'))
+
+    if(ls.parallel & n.pc>1){
+      tryCatch({
+        estLenscales = foreach::foreach(i=1:n.pc) %dopar% blhs.loop.lite(y=V.t[i,],X=XT,m=m,K=K,da=dConfig,g=g,ga = gConfig[[i]],nug.est=nug.est)
+      },error=function(e){
+        if(make.cluster)
+          parallel::stopCluster(cl)
+        stop("\nError in parallel processing. This could be due to a memory issue.\nTry ls.parallel=F. This will be slower because the estimation will be done in serial. If that does not work, try ls.subsample='strat' or 'rand' for stratified or simple random sampling with ls.subsample.size<m.\n")
+      })
+    } else{
+      estLenscales = lapply(1:n.pc, function(i) blhs.loop.lite(y=V.t[i,],X=XT,m=m,K=K,da=dConfig,g=g,ga=gConfig[[i]],nug.est = nug.est))
+    }
+    if(nug.est){
+      estNugs = sapply(1:n.pc, function(i) estLenscales[[i]][1+ncol(XT)])
+      estLenscales = lapply(1:n.pc, function(i) estLenscales[[i]][1:ncol(XT)])
+    }
+  } else{
+    if(subsample=='strat' & ls.subsample.size<nrow(XT)){
+      sample.time = proc.time()[3]
+      samp.id = strat.sample(data.frame(XT),ls.subsample.size,m,K)
+      sample.time = proc.time()[3] - sample.time
+    } else if(subsample=='rand' & ls.subsample.size<nrow(XT)){
+      sample.time = proc.time()[3]
+      samp.id = lapply(1:K,function(i) sample(1:ncol(V.t),ls.subsample.size))
+      sample.time = proc.time()[3] - sample.time
+    } else{
+      if(K==1){
+        if(verbose)
+          message("Estimating with all data and no bootstrap resamples.\n")
+        samp.id = list(1:nrow(XT))
+      } else{
+        if(verbose)
+          message(paste0("Estimating with all data and ",K," bootstrap resamples.\n"))
+        samp.id = lapply(1:K,function(i) sample(1:ncol(V.t),ncol(V.t),replace = T))
+      }
+      sample.time = 0
+    }
+    get_ls = function(XT,V.t,d,g,K,j){
+      gp = laGP::newGPsep(X = XT,Z = V.t,d = d$start,g = g$start,dK = TRUE)
+      mle = list(conv=1)
+      i = 0
+      maxit=100
+      while(mle$conv==1 & i<=1000){
+        if(nug.est){
+          mle = laGP::jmleGPsep(gp,
+                               drange = c(d$min,10*d$max),
+                               grange = c(g$min,g$max),
+                               dab=d$ab,
+                               gab=g$ab,
+                               maxit=maxit)
+          mle$conv = mle$dconv
+        } else{
+          mle = laGP::mleGPsep(gp,
+                               param='d',
+                               tmin = d$min,
+                               tmax = 10*d$max,
+                               ab=d$ab,
+                               maxit=maxit)
+        }
+
+        i = i+maxit
+        if(mle$conv==1){
+          message(paste('Warning: mleGPsep for bootstrap replicate',K,'and basis component',j,'has not converged after',i*100,'iterations.'))
+        }
+      }
+      if(nug.est){
+        return(as.numeric(mle[1:(ncol(XT)+1)]))
+      } else{
+        return(mle$d)
+      }
+    }
+    if(nug.est){
+      tmp.ls = array(dim=c(n.pc,ncol(XT)+1,K)) # space for nugget
+    } else{
+      tmp.ls = array(dim=c(n.pc,ncol(XT),K))
+    }
+    for(k in 1:K){
+      if(ls.parallel){
+        tmp.ls[,,k] = foreach::foreach(j=1:n.pc,.combine='rbind') %dopar% get_ls(XT[samp.id[[k]],,drop=F],V.t[j,samp.id[[k]]],dConfig,gConfig[[j]],k,j)
+      } else{
+        tmp.ls[,,k] = t(sapply(1:n.pc, function(j) get_ls(XT[samp.id[[k]],,drop=F],V.t[j,samp.id[[k]]],dConfig,gConfig[[j]],k,j)))
+        ##### DEV #####
+        # tried using mlegp - didn't seem to change much
+        # tmp.ls[,,k] = t(sapply(1:n.pc, function(i) 1/nugget=g,nugget.known=1,verbose=0,simplex.ntries = 1)$beta))
+      }
+    }
+
+    invisible(utils::capture.output(laGP::deleteGPseps()))
+    estLenscales = apply(tmp.ls[,1:ncol(XT),,drop=F],1:2,median) # median lengthscale over subsamples
+    estLenscales = lapply(seq_len(n.pc), function(i) estLenscales[i,]) # convert to list of row vectors
+    if(nug.est)
+      estNugs = apply(tmp.ls[,1+ncol(XT),,drop=F],1:2,median)
+    if(ls.parallel & make.cluster)
+      parallel::stopCluster(cl)
+  }
+
+  return = list()
+  return$XT = estLenscales
+  if(p.x>0){
+    return$X = lapply(1:n.pc, function(i) estLenscales[[i]][1:p.x])
+  } else{
+    return$X = list()
+  }
+  if(p.t>0){
+    return$T = lapply(1:n.pc, function(i) estLenscales[[i]][(p.x+1):(p.x+p.t)])
+  } else{
+    return$T = list()
+  }
+  if(nug.est){
+    return$g = estNugs
+  } else{
+    return$g = rep(g,n.pc)
+  }
+  return$time = ptm-proc.time()[3]
+  return$subsample = subsample
+  if(subsample %in% c('strat','rand')){
+    return$sample.time = sample.time
+    return$samp.id = samp.id
+  }
+  return$m = m
+  return$k = K
+  return$prior = ls.prior
+  return$subsample.size = ls.subsample.size
+  return$parallel = ls.parallel
+  return(return)
+}
+
 # FUNCTION: unit_xform
 ### Transform columns to lie in unit interval
 # Parameters
@@ -283,16 +447,18 @@ unit_xform = function(X,X.min=NULL,X.range=NULL){
               range=X.range))
 }
 
-transform_y = function(Y.sim,y.ind.sim=NULL,Y.obs=NULL,y.ind.obs=NULL,center=T,scale=T,scaletype='scalar'){
+transform_y = function(Y.sim,y.ind.sim=NULL,Y.obs=NULL,y.ind.obs=NULL,center=T,scale=T,scaletype='scalar',responsetype='functional'){
   sim.list = list()
   if(!is.null(Y.obs)){
     obs.list = list()
   } else{
     obs.list = NULL
   }
-
-
-  n.y.sim = nrow(Y.sim)
+  if(responsetype=='functional'){
+    n.y.sim = nrow(Y.sim)
+  } else{
+    n.y.sim = 1
+  }
   if(is.null(y.ind.sim))
     y.ind.sim = matrix(seq(1:n.y.sim))
   dim = ncol(y.ind.sim)
@@ -300,7 +466,11 @@ transform_y = function(Y.sim,y.ind.sim=NULL,Y.obs=NULL,y.ind.obs=NULL,center=T,s
   # scale Y.sim
   sim.list$orig = Y.sim
   if(center){
-    sim.list$mean = rowMeans(Y.sim)
+    if(responsetype=='scalar'){
+      sim.list$mean = mean(Y.sim)
+    } else{
+      sim.list$mean = rowMeans(Y.sim)
+    }
     sim.list$trans = sim.list$orig - sim.list$mean
   } else{
     sim.list$mean = rep(0,n.y.sim)
@@ -309,8 +479,14 @@ transform_y = function(Y.sim,y.ind.sim=NULL,Y.obs=NULL,y.ind.obs=NULL,center=T,s
 
   # check
   if(center){
-    if(!all(abs(rowMeans(sim.list$trans)) < 1e-8)){
-      stop('Y.sim not properly centered \n')
+    if(responsetype=='scalar'){
+      if(!(abs(mean(sim.list$trans)) < 1e08)){
+        stop('Y.sim not properly centered \n')
+      }
+    } else{
+      if(!all(abs(rowMeans(sim.list$trans)) < 1e-8)){
+        stop('Y.sim not properly centered \n')
+      }
     }
   }
 
@@ -322,7 +498,7 @@ transform_y = function(Y.sim,y.ind.sim=NULL,Y.obs=NULL,y.ind.obs=NULL,center=T,s
     } else if(scaletype=='scalar') {
       if(center){
         # we already centered data so we can compute the sd faster
-        sd = sum(sim.list$trans^2)/(prod(dim(sim.list$trans))-1)
+        sd = sqrt(sum(sim.list$trans^2)/(prod(dim(sim.list$trans))-1))
       } else{
         # this is breaking for huge matrices
         sd = sd(sim.list$trans)
@@ -337,7 +513,11 @@ transform_y = function(Y.sim,y.ind.sim=NULL,Y.obs=NULL,y.ind.obs=NULL,center=T,s
   # scale Y.obs
   if(!is.null(Y.obs)){
     obs.list$orig = Y.obs
-    obs.list$n.y = nrow(Y.obs)
+    if(responsetype=='functional'){
+      obs.list$n.y = nrow(Y.obs)
+    } else{
+      obs.list$n.y = 1
+    }
     if(is.null(y.ind.obs))
       y.ind.obs = matrix(seq(1:obs.list$n.y))
     if(!isTRUE(all.equal(y.ind.obs,y.ind.sim))){
@@ -370,7 +550,7 @@ transform_y = function(Y.sim,y.ind.sim=NULL,Y.obs=NULL,y.ind.obs=NULL,center=T,s
     }
   }
   sim.list$ind = y.ind.sim
-  sim.list$n.y = nrow(Y.sim)
+  sim.list$n.y = n.y.sim
   obs.list$ind = y.ind.obs
   return(list(sim=sim.list,obs=obs.list,
               n=ncol(Y.obs),m=ncol(Y.sim)))
@@ -380,7 +560,7 @@ transform_y = function(Y.sim,y.ind.sim=NULL,Y.obs=NULL,y.ind.obs=NULL,center=T,s
 ### Transforms inputs to lie on the unit hypercube
 # T.obs are optional known calibration parameters for the observed data
 # transforming these is useful for checking predictions at obs locations
-transform_xt = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL){
+transform_xt = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,X.min=NULL,X.range=NULL,T.min=NULL,T.range=NULL){
   sim.list = list()
   obs.list = list()
   if(is.null(X.sim) & is.null(T.sim)){
@@ -388,13 +568,13 @@ transform_xt = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL){
   }
   if(!is.null(X.sim)){
     p.x = ncol(X.sim)
-    sim.list$X = unit_xform(X.sim)
+    sim.list$X = unit_xform(X.sim,X.min,X.range)
   } else{
     p.x = 0
   }
   if(!is.null(T.sim)){
     p.t = ncol(T.sim)
-    sim.list$T = unit_xform(T.sim)
+    sim.list$T = unit_xform(T.sim,T.min,T.range)
   } else{
     p.t = 0
   }
@@ -461,6 +641,32 @@ sc_inputs = function(X,ls){
   return(sweep(X, 2, sqrt(ls), FUN = '/'))
 }
 
+#' @title print FlaGP model information
+#'
+#' @description Prints relevant model information
+#' @param flagp an \code{flagp} object.
+#' @details
+#' @export
+#' @examples
+#'
+print.flagp = function(flagp){
+  cat('FlaGP Model.\n')
+  cat('Response:', flagp$flags$responsetype, '\n')
+  cat('Biased:', flagp$flags$bias, '\n')
+  cat('m:', flagp$num$m,'\n')
+  cat('n:', flagp$num$n,'\n')
+  if(is.null(flagp$basis$sim$n.pc)){
+    cat('pct.var:', flagp$basis$sim$pct.var,'\n')
+  } else{
+    cat('n.pc:', flagp$basis$sim$n.pc,'\n')
+  }
+  cat('p.x:',flagp$num$p.x,'\n')
+  cat('p.t:',flagp$num$p.t,'\n')
+  cat('dim Y.sim:', dim(flagp$Y.data$sim$orig),'\n')
+  if(!is.null(flagp$Y.data$obs$orig))
+    cat('dim Y.obs:', dim(flagp$Y.data$obs$orig),'\n')
+}
+
 #' @title FlaGP data object constructor
 #'
 #' @description Builds FlaGP data object and does necessary precomputing
@@ -498,33 +704,40 @@ sc_inputs = function(X,ls){
 #' # See examples folder for R markdown notebooks.
 #'
 flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                                           # X and T data
-                    Y.sim,y.ind.sim=NULL,Y.obs=NULL,y.ind.obs=NULL,center=T,scale=T,scaletype='scalar', # Y data
-                    n.pc = NULL, pct.var = .95, B = NULL, V.t = NULL, sigma.y=NULL,                     # sim basis
-                    ls.subsample = 'strat', ls.nugget=1e-7, ls.m = 1, ls.K = 1, ls.prior=T, ls.parallel=T, make.cluster=T, ls.subsample.size = 250, # length scale estimation
-                    bias=F,D=NULL,                                                                      # discrepancy
-                    small=F,seed=NULL,verbose=T,
-                    rsvd = F){                                                       # additional flags
+                 Y.sim,y.ind.sim=NULL,Y.obs=NULL,y.ind.obs=NULL,center=T,scale=T,scaletype='scalar', # Y data
+                 X.min=NULL,X.range=NULL,
+                 n.pc = NULL, pct.var = .95, B = NULL, V.t = NULL, sigma.y=NULL,                     # sim basis
+                 ls.subsample = 'strat', ls.nugget=1e-7, ls.m = 1, ls.K = 1, ls.prior=T, ls.parallel=T, make.cluster=T, ls.subsample.size = 250, # length scale estimation
+                 bias=F,D=NULL,                                                                      # discrepancy
+                 small=F,seed=NULL,verbose=T,
+                 rsvd = F, nug.est = T){                                                       # additional flags
 
-  # force inputs to be matrices
-  if(!is.null(X.sim) & is.null(dim(X.sim))){
-    X.sim = matrix(X.sim,ncol=1)
+  # sim
+  if(!is.null(X.sim)){
+    if(!is.matrix(X.sim)) # X.sim is a vector indicating scalar response, make it a matrix with 1 column
+      X.sim = matrix(X.sim,ncol=1)
   }
-  if(!is.null(T.sim) & is.null(dim(T.sim))){
-    T.sim = matrix(T.sim,ncol=1)
+  if(!is.null(T.sim)){
+    if(!is.matrix(T.sim))
+      T.sim = matrix(T.sim,ncol=1)
   }
-  if(!is.null(X.obs) & is.null(dim(X.obs))){
-    X.obs = matrix(X.obs,ncol=1)
+  if(!is.null(Y.sim)){
+    if(!is.matrix(Y.sim))
+      Y.sim = matrix(Y.sim,ncol=1)
   }
-  if(is.null(dim(Y.sim))){
-    Y.sim = matrix(Y.sim,nrow=1)
+  # obs
+  if(!is.null(X.obs)){
+    if(!is.matrix(X.obs))
+      X.obs = matrix(X.obs,ncol=1)
   }
-  if(!is.null(Y.obs) & is.null(dim(Y.obs))){
-    Y.obs = matrix(Y.obs,nrow=1)
+  if(!is.null(Y.obs) & !is.list(Y.obs)){
+    if(!is.matrix(Y.obs))
+      Y.obs = matrix(Y.obs,ncol=1)
   }
 
   # force certain parameters if scalar response
-  if(nrow(Y.sim)==1){
-    response.type = 'scalar'
+  if(ncol(Y.sim)==1){
+    responsetype = 'scalar'
     y.ind.sim = matrix(1)
     if(!is.null(Y.obs))
       y.ind.obs = matrix(1)
@@ -539,18 +752,19 @@ flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                   
     n.pc = 1
     pct.var = NULL
   } else{
-    response.type = 'functional'
+    responsetype = 'functional'
   }
 
-  data = list(bias=bias,num=list(m=ncol(Y.sim),
-                                 n=max(0,ncol(Y.obs)),
-                                 p.x = max(0,ncol(X.sim)),
-                                 p.t = max(0,ncol(T.sim)),
-                                 g = ls.nugget))
+  data = list(bias=bias,
+              num=list(m=ncol(Y.sim),
+                       n=max(0,ncol(Y.obs)),
+                       p.x = max(0,ncol(X.sim)),
+                       p.t = max(0,ncol(T.sim))))
+
   # print information about data
   if(verbose){
     cat('Building FlaGP data object.\n')
-    cat('Response:', response.type, '\n')
+    cat('Response:', responsetype, '\n')
     cat('m:', data$num$m,'\n')
     cat('n:', data$num$n,'\n')
     if(is.null(n.pc)){
@@ -561,17 +775,19 @@ flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                   
     cat('p.x:',data$num$p.x,'\n')
     cat('p.t:',data$num$p.t,'\n')
     cat('dim Y.sim:', dim(Y.sim),'\n')
-    cat('dim Y.obs:', dim(Y.obs),'\n')
+    if(!is.null(Y.obs))
+      cat('dim Y.obs:', dim(Y.obs),'\n')
   }
-  if(bias & data$num$n<5)
-      warning(paste0('Discrepancy model will be a GP fit to only n=',n,' data points.\n'))
+  if(bias & data$num$n<5){
+    warning(paste0('For one or more of the experiments, a discrepancy model will be a GP fit to only n=',data$num$n,' data points.\n'))
+  }
   # precomputing and data building including lengthscale estimation
   start.time = proc.time()[3]
   if(verbose){cat('transforming X,T... ')}
-  data$XT.data = transform_xt(X.sim,T.sim,X.obs,T.obs)
+  data$XT.data = transform_xt(X.sim,T.sim,X.obs,T.obs,X.min,X.range)
   if(verbose){cat('done.\n')}
   if(verbose){cat('transforming Y... ')}
-  data$Y.data = transform_y(Y.sim,y.ind.sim,Y.obs,y.ind.obs,center,scale,scaletype)
+  data$Y.data = transform_y(Y.sim,y.ind.sim,Y.obs,y.ind.obs,center,scale,scaletype,responsetype)
   if(verbose){cat('done.\n')}
   if(verbose){cat('computing sim basis... ')}
   data$basis = list(); class(data$basis) = c('basis',class(data$basis))
@@ -587,13 +803,18 @@ flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                   
     data$basis$obs = NULL
     precomp = FALSE
   }
+
+  # for comparison it's useful to know how long it took to fit the model without any data precomputing before
+  fit.time = proc.time()
   if(verbose){cat('estimating lengthscale parameters... ')}
   data$lengthscales = mv_lengthscales(cbind(data$XT.data$sim$X$trans,data$XT.data$sim$T$trans),data$num$p.x,data$num$p.t,
-                                      data$basis$sim$V.t,data$num$g,ls.subsample,ls.m,ls.K,seed,ls.prior,ls.parallel,make.cluster,ls.subsample.size,verbose=verbose)
+                                      data$basis$sim$V.t,ls.nugget,ls.subsample,ls.m,ls.K,seed,ls.prior,ls.parallel,make.cluster,ls.subsample.size,nug.est=nug.est,verbose=verbose)
+  data$num$g = data$lengthscales$g
   if(verbose){cat('done.\n')}
   if(verbose){cat('stretching and compressing inputs... ')}
   data$SC.inputs = get_SC_inputs(data$lengthscales, data$XT.data, data$basis$sim$n.pc)
   if(verbose){cat('done.\n')}
+  fit.time = fit.time[3] - proc.time()[3]
 
   if(precomp){
     precomp.start.time = proc.time()[3]
@@ -602,13 +823,12 @@ flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                   
     precomp = list()
     BD = cbind(data$basis$obs$B,
                data$basis$obs$D)
-    tBD = t(BD)
     precomp$rankBD = pracma::Rank(BD)
-    BDtBD = tBD%*%BD
+    BDtBD = crossprod(BD)
     precomp$BDtBDinv = chol2inv(chol(BDtBD + 1e-8*diag(1,nrow(BDtBD))))
     precomp$ldetBDtBD = determinant(BDtBD)$modulus
-    precomp$BDtBDinvtBD = precomp$BDtBDinv%*%tBD
-    precomp$LLHmat = diag(1,data$Y.data$obs$n.y)-BD%*%precomp$BDtBDinv%*%tBD
+    precomp$BDtBDinvtBD = tcrossprod(precomp$BDtBDinv,BD)
+    precomp$LLHmat = diag(1,data$Y.data$obs$n.y)-BD%*%tcrossprod(precomp$BDtBDinv,BD)
     data$precomp = precomp
     data$precomp$time = proc.time()[3] - precomp.start.time
     if(verbose){cat('done.\n')}
@@ -616,21 +836,74 @@ flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                   
     data$precomp = NULL
   }
   if(small){
-    # remove potentially huge sim data matrices
+    # do not store potentially large data matrices
     data$Y.data$sim$orig = NULL
     data$Y.data$sim$trans = NULL
   }
   data$time = proc.time()[3] - start.time
-  # how can I return the objects in data without making a copy? I need to give it a class.
+  # some useful flags for remembering how the model was called
+
+  data$flags = list(center=center,scale=scale,scaletype=scaletype,responsetype=responsetype,
+                    rsvd=rsvd,n.pc=n.pc,pct.var=pct.var,
+                    ls.nugget=ls.nugget,nug.est=nug.est,ls.K=ls.K,ls.m=ls.m,
+                    ls.subsample=ls.subsample,ls.parallel=ls.parallel,ls.subsample.size=ls.subsample.size)
   class(data) = c('flagp',class(data))
   return(data)
 }
 
+#' @title update FlaGP model
+#'
+#' @description updates FlaGP data object with additional simulation data. Currently incomplete, if refitting, needs to get all flags from previous model
+#' @param model FlaGP model object
+#' @param Xnew_orig new X to add on original scale
+#' @param Ynew_orig new Y to add on original scale
+#' @param refit should the covariance parameters be estimated again?
+#' @details Returns FlaGP data object
+#' @export
+#' @examples
+#' # See examples folder for R markdown notebooks.
+#'
+flagp_update = function(model,Xnew_orig,Tnew_orig=NULL,Ynew_orig,refit=F){
+  if(refit){
+    model = flagp(X.sim = rbind(Xnew_orig,model$XT.data$sim$X$orig),
+                  T.sim = rbind(Tnew_orig,model$XT.data$sim$T$orig),
+                  X.obs = model$XT.data$obs$X$orig,
+                  T.obs = model$XT.data$obs$T$orig,
+                  Y.sim = cbind(Ynew_orig,model$Y.data$sim$orig),
+                  y.ind.sim = model$Y.data$sim$ind,
+                  Y.obs = model$Y.data$obs$orig,y.ind.obs = model$Y.data$obs$ind, X.min = model$XT.data$sim$X$min, X.range = model$XT.data$sim$X$range,
+                  center = model$flags$center,scale = model$flags$scale,scaletype = model$flags$scaletype,n.pc = model$flags$n.pc,pct.var = model$flags$pct.var,
+                  nug.est = model$flags$nug.est,ls.subsample=model$flags$ls.subsample,ls.m = model$flags$ls.m,ls.K = model$flags$ls.K,
+                  ls.parallel = model$flags$ls.parallel,ls.subsample.size = model$flags$ls.subsample.size,ls.nugget=model$flags$ls.nugget,verbose = F)
+  } else{
+    # don't do any rescaling or the sequential design results will be completely unstable
+    model$XT.data$sim$X$orig = rbind(Xnew_orig,model$XT.data$sim$X$orig)
+    model$XT.data$sim$X$trans = rbind(unit_xform(Xnew_orig,model$XT.data$sim$X$min,model$XT.data$sim$X$range)$trans,model$XT.data$sim$X$trans)
+    if(!is.null(Tnew_orig)){
+      model$XT.data$sim$T$orig = rbind(Tnew_orig,model$XT.data$sim$T$orig)
+      model$XT.data$sim$X$trans = rbind(unit_xform(Tnew_orig,model$XT.data$sim$T$min,model$XT.data$sim$T$range)$trans,model$XT.data$sim$T$trans)
+    }
+
+    model$num$m = model$num$m + nrow(Xnew_orig)
+
+    model$Y.data$sim$orig = cbind(Ynew_orig,model$Y.data$sim$orig)
+    Ynew_trans = (Ynew_orig - model$Y.data$sim$mean)/model$Y.data$sim$sd
+    model$Y.data$sim$trans = cbind(Ynew_trans,model$Y.data$sim$trans)
+
+    # add V response for new Y and add it to previous V's
+    model$basis$sim$V.t = cbind(tcrossprod(solve(crossprod(model$basis$sim$B)),model$basis$sim$B)%*%Ynew_trans,
+                                model$basis$sim$V.t)
+  }
+  return(model)
+}
+
 # A more lightweight version of the laGP::blhs.loop function that does not return any additional information
 # other than the lengthscale estimates
-blhs.loop.lite = function (y, X, m, K, da, g = 0.001, maxit = 100)
+blhs.loop.lite = function (y, X, m, K, da, g, ga, nug.est=F,maxit = 100)
 {
   boot_theta_loop <- matrix(NA, nrow = K, ncol = ncol(X))
+  if(nug.est)
+    boot_g_loop = numeric(K)
   failed=0
   for (kk in 1:K) {
     #sub <- laGP::blhs(y = y, X = X, m = m)
@@ -683,31 +956,63 @@ blhs.loop.lite = function (y, X, m, K, da, g = 0.001, maxit = 100)
         cat(kk,'\n')
       }
       boot_theta_loop[kk, ] <- NA
+      if(nug.est)
+        boot_g_loop[kk] = NA
     } else{
       gpsepi <- laGP::newGPsep(as.matrix(Xsub), ysub, d = da$start,
-                               g = g, dK = TRUE)
+                               g = ga$start, dK = TRUE)
       # gpsepi <- laGP::newGPsep(as.matrix(sub$xs), sub$ys, d = da$start,
       #                    g = g, dK = TRUE)
-      mle <- laGP::mleGPsep(gpsepi, tmin = da$min, tmax = 10 * da$max,
-                            ab = da$ab, maxit = maxit)
-      i = 0
-      while(mle$conv==1){
+      if(nug.est){
+        mle <- laGP::jmleGPsep(gpsepi, drange=c(da$min,10*da$max), grange=c(ga$min,ga$max),
+                              dab = da$ab, gab=ga$ab, maxit = maxit)
+        mle$conv=mle$dconv
+      } else{
         mle <- laGP::mleGPsep(gpsepi, tmin = da$min, tmax = 10 * da$max,
                               ab = da$ab, maxit = maxit)
+      }
+      i = 0
+      while(mle$conv==1){
+        if(nug.est){
+          mle <- laGP::jmleGPsep(gpsepi, drange=c(da$min,10*da$max), grange=c(ga$min,ga$max),
+                                 dab = da$ab, gab=ga$ab, maxit = maxit)
+          mle$conv = mle$dconv
+        } else{
+          mle <- laGP::mleGPsep(gpsepi, tmin = da$min, tmax = 10 * da$max,
+                                ab = da$ab, maxit = maxit)
+        }
         i = i+maxit
         if(mle$conv==1){
           message(paste('Warning: mleGPsep for bootstrap replicate',K,'has not converged after',i*100,'iterations.'))
         }
       }
       laGP::deleteGPsep(gpsepi)
-      boot_theta_loop[kk, ] <- mle$d
+      if(nug.est){
+        boot_theta_loop[kk, ] <- as.numeric(mle[1:ncol(X)])
+        boot_g_loop[kk] = as.numeric(mle[ncol(X)+1])
+      } else{
+        boot_theta_loop[kk, ] <- mle$d
+      }
     }
-
   }
   theta.hat_median <- apply(boot_theta_loop, 2, median, na.rm=T)
+  if(nug.est){
+    g_median = median(boot_g_loop)
+  } else{
+    g_median = NA
+  }
+
+
   if(is.na(theta.hat_median[1]))
     stop('blhs failed.\n')
-  return(theta.hat_median)
+  if(nug.est & is.na(g_median))
+    stop('blhs failed.\n')
+
+  if(nug.est){
+    return(c(theta.hat_median,g_median))
+  } else{
+    return(theta.hat_median)
+  }
 }
 blhs.lite = function (D, m)
 {
