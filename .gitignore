@@ -7,9 +7,8 @@ dev
 *.Rproj.user
 *.Rhistory
 # ignore C files
-*.c
-*.o
-src/FlaGP.so
-*.h
+src/*.o
+src/*.so
 .Rproj.user
 examples/Aluminum
+examples/multivariate_sepia

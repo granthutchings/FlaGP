@@ -3,7 +3,7 @@ energy_score = function(y.samp,y,terms=F,parallel=T){
   n.samples = dim(y.samp)[1]
   n.y = dim(y.samp)[2]
   n = dim(y.samp)[3]
-  cat('n:',n)
+  
   # make sure the field data shape matches the samples shape
   if(!all(dim(y)==c(n.y,n)))
     dim(y) = c(n.y,n)
