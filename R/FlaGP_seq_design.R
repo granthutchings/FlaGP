@@ -16,21 +16,21 @@ seq_design_max_var_y = function(model,Xcand01,n.pc=model$basis$sim$n.pc,end=50){
   # pick points near the boundary
   X_orig = t((t(X) * model$XT.data$sim$X$range) + model$XT.data$sim$X$min)
   return(list(X_new=X,X_new_orig=X_orig,predvar=predvar,
-              max_var = predvar[which.max(predvar)], id = id))
+              max_var = predvar[which.max(predvar)], cand_id = id))
 }
-seq_design_max_var_lagp = function(model,Xcand01,n.pc,NN){
+seq_design_max_var_lagp = function(model,Xcand01,start=6,end=20){
   B = model$basis$sim$B
   V.t = model$basis$sim$V.t
   X = model$XT.data$sim$X$trans
-  ls = model$lengthscales$X
+  #ls = model$lengthscales$X
   ysd = model$Y.data$sim$sd
   mods = list()
-  n.pc = min(n.pc,ncol(B))
+  n.pc = min(model$n.pc,ncol(B))
   wvars = matrix(nrow=n.pc,ncol=nrow(Xcand01))
   yvars = array(0,dim=c(nrow(B),nrow(Xcand01)))
   for(i in 1:n.pc){
-    Xi = FlaGP:::sc_inputs(X,ls[[i]])
-    mods[[i]] = laGP::aGP(XX = Xcand01,X = Xi,Z = V.t[i,],g=list(start=1e-4,mle=F),d=1,start=10,end=NN,verb=F)
+    # Xi = FlaGP:::sc_inputs(X,ls[[i]])
+    mods[[i]] = laGP::aGP(XX = Xcand01,X = X,Z = V.t[i,],g=list(start=1e-4,mle=F),d=1,start=start,end=end,verb=F)
     wvars[i,] = mods[[i]]$var # mods[[i]]$s2*(NN/(NN-2))
   }
   for(j in 1:nrow(Xcand01)){
@@ -41,6 +41,7 @@ seq_design_max_var_lagp = function(model,Xcand01,n.pc,NN){
   X_orig = t((t(X) * model$XT.data$sim$X$range) + model$XT.data$sim$X$min)
   return(list(X_new=X,X_new_orig=X_orig,max_var = predvar[which.max(predvar)]))
 }
+
 #' @title FlaGP sequential design
 #'
 #' @description selects the X which reduces IMSE over the entire domain when added to the training set
@@ -57,9 +58,15 @@ seq_design_max_var_lagp = function(model,Xcand01,n.pc,NN){
 #' @examples
 #' # See examples folder for R markdown notebooks.
 #'
-seq_design = function(model,n_cand=100,n_int=100,Xcand = NULL,Xint = NULL,seed=NULL, end=50, n.pc=-1){
+seq_design = function(model,n_cand=100,n_int=100,Xcand = NULL,Xint = NULL,seed=NULL, end=50, n.pc=-1, method='imse'){
   if(!is.null(seed))
     set.seed(seed)
+
+  if(n.pc==-1 | n.pc>model$basis$sim$n.pc){
+    # use whatever number of components the model has
+    n.pc = model$basis$sim$n.pc
+  }
+
   # compute MSE over entire support
   XcandGiven=F
   if(!is.null(Xcand))
@@ -73,11 +80,17 @@ seq_design = function(model,n_cand=100,n_int=100,Xcand = NULL,Xint = NULL,seed=N
     Xcand01 = lhs::maximinLHS(n_cand,model$num$p.x + model$num$p.t)
   } else{
     Xcand01 = Xcand
+    n_cand = nrow(Xcand01)
     # Xcand01 = t((t(Xcand) - model$XT.data$sim$X$min) / model$XT.data$sim$X$range)
   }
+  if(method=='maxvar' | method == 'MaxVar')
+    return(seq_design_max_var_y(model,Xcand01,n.pc=n.pc,end=end))
+
   if(!XintGiven){
     Xint = lhs::maximinLHS(n_int,model$num$p.x + model$num$p.t)
   } else{
+    n_int = nrow(Xint)
+    # Xint always on [0,1]
     # Xint01 = Xint
     # Xint01 = t((t(Xint) - model$XT.data$sim$X$min) / model$XT.data$sim$X$range)
   }
@@ -96,18 +109,14 @@ seq_design = function(model,n_cand=100,n_int=100,Xcand = NULL,Xint = NULL,seed=N
   # XtrainSC = FlaGP:::get_SC_inputs(model$lengthscales,model$XT.data,model$basis$sim$n.pc)$XT.sim
   XcandSC = lapply(1:model$basis$sim$n.pc, function(i) FlaGP:::sc_inputs(Xcand01,model$lengthscales$XT[[i]]))
   # for which integration points will the candidate point be included in the 'end' nearest neighbors
-  XtrainSC = lapply(1:model$basis$sim$n.pc, function(i) FlaGP:::sc_inputs(model$XT.data$sim$X$trans,model$lengthscales$XT[[i]]))
+  XtrainSC = lapply(1:model$basis$sim$n.pc, function(i) FlaGP:::sc_inputs(cbind(model$XT.data$sim$X$trans,model$XT.data$sim$T$trans),model$lengthscales$XT[[i]]))
 
   end = min(end,model$num$m+1)
-  if(n.pc==-1 | n.pc>model$basis$sim$n.pc){
-    # use whatever number of components the model has
-    n.pc = model$basis$sim$n.pc
-  }
+
   # we can compute the variance of y in closed form from the variance of w
   # this means that we could also get the quantiles of y
   cat('computing current IMSE ...\n')
-  pred = predict(model,X.pred.orig = Xint, verbose = F,end.eta=end,y.conf.int = T,n.pc=n.pc,X01=T)
-  # pred$y.var =
+  pred = predict(model,X.pred.orig = Xint, verbose = F,end.eta=end,y.conf.int = T,n.pc=n.pc,X01=T,resid.error = F)
   imse_current_x = colMeans(pred$y.var)
   imse_current = mean(imse_current_x)
 
@@ -152,8 +161,6 @@ seq_design = function(model,n_cand=100,n_int=100,Xcand = NULL,Xint = NULL,seed=N
 
     # compute new IMSE
     XintSC_todo = lapply(1:length(XintSC), function(kk) XintSC[[kk]][int_points_to_do,])
-    # pred_int = FlaGP:::aGPsep_SC_mv(X = XtrainSC,Z = model_tmp$basis$sim$V.t,XintSC_todo,model_tmp$lengthscales$g,end = NN)
-    # pred_int$y.var = pred_int$krigvar
     pred_int = predict(model_tmp,X.pred.orig = Xint[int_points_to_do,], verbose = F,end.eta=end,y.var=T,n.pc=n.pc,X01=T)
     tmp = imse_current_x
     tmp[int_points_to_do] = colMeans(pred_int$y.var)

@@ -3,7 +3,7 @@ energy_score = function(y.samp,y,terms=F,parallel=T){
   n.samples = dim(y.samp)[1]
   n.y = dim(y.samp)[2]
   n = dim(y.samp)[3]
-  cat('n:',n)
+
   # make sure the field data shape matches the samples shape
   if(!all(dim(y)==c(n.y,n)))
     dim(y) = c(n.y,n)
@@ -144,6 +144,9 @@ plot_basis = function(b,Y.obs,y.ind.sim,legend=T,xlab='x')
 #' # See examples folder for R markdown notebooks.
 #'
 plot.flagp = function(flagp,basis=T,legend=T,sim.subsample=1:flagp$Y.data$m,xlab='x',ylab='y',...){
+  if(length(sim.subsample)>1000){
+    sim.subsample=sample(1:flagp$Y.data$m,1000,replace = F)
+  }
   if(ncol(flagp$Y.data$sim$ind == 1)){
     if(!is.null(flagp$Y.data$sim$orig)){
       par(mfrow=c(1,2),mar=c(4,4,4,.3))

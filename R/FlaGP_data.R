@@ -560,7 +560,7 @@ transform_y = function(Y.sim,y.ind.sim=NULL,Y.obs=NULL,y.ind.obs=NULL,center=T,s
 ### Transforms inputs to lie on the unit hypercube
 # T.obs are optional known calibration parameters for the observed data
 # transforming these is useful for checking predictions at obs locations
-transform_xt = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,X.min=NULL,X.range=NULL,T.min=NULL,T.range=NULL){
+transform_xt = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,X.min=NULL,X.range=NULL,T.min=NULL,T.range=NULL,do_transform = T){
   sim.list = list()
   obs.list = list()
   if(is.null(X.sim) & is.null(T.sim)){
@@ -568,24 +568,38 @@ transform_xt = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,X.min=NULL,X
   }
   if(!is.null(X.sim)){
     p.x = ncol(X.sim)
-    sim.list$X = unit_xform(X.sim,X.min,X.range)
+    if(do_transform)
+      sim.list$X = unit_xform(X.sim,X.min,X.range)
+    else
+      sim.list$X = list(orig=X.sim,trans=X.sim,min=rep(0,p.x),range=rep(1,p.x))
   } else{
     p.x = 0
   }
   if(!is.null(T.sim)){
     p.t = ncol(T.sim)
-    sim.list$T = unit_xform(T.sim,T.min,T.range)
+    if(do_transform)
+      sim.list$T = unit_xform(T.sim,T.min,T.range)
+    else{
+      sim.list$T = list(orig=T.sim,trans=T.sim,min=rep(0,p.t),range=rep(1,p.t))
+    }
   } else{
     p.t = 0
   }
 
   if(!is.null(X.obs)){
-    obs.list$X = unit_xform(X.obs,X.min=sim.list$X$min,X.range=sim.list$X$range)
+    if(do_transform)
+      obs.list$X = unit_xform(X.obs,X.min=sim.list$X$min,X.range=sim.list$X$range)
+    else
+      obs.list$X = list(orig=X.obs,trans=X.obs,min=rep(0,p.x),range=rep(1,p.x))
   }
   if(!is.null(T.obs)){
-    obs.list$T = unit_xform(T.obs,X.min=sim.list$T$min,X.range=sim.list$T$range)
+    if(do_transform)
+      obs.list$T = unit_xform(T.obs,X.min=sim.list$T$min,X.range=sim.list$T$range)
+    else{
+      obs.list$T = list(orig=T.obs,trans=T.obs,min=rep(0,p.t),range=rep(1,p.t))
+    }
   }
-  return(list(sim=sim.list,obs=obs.list,p.x=p.x,p.t=p.t))
+  return(list(sim=sim.list,obs=obs.list,p.x=p.x,p.t=p.t,transformed=do_transform))
 }
 
 # FUNCTOIN: mean_sd_xform
@@ -705,7 +719,7 @@ print.flagp = function(flagp){
 #'
 flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                                           # X and T data
                  Y.sim,y.ind.sim=NULL,Y.obs=NULL,y.ind.obs=NULL,center=T,scale=T,scaletype='scalar', # Y data
-                 X.min=NULL,X.range=NULL,
+                 X.min=NULL,X.range=NULL,transform_x=T,
                  n.pc = NULL, pct.var = .95, B = NULL, V.t = NULL, sigma.y=NULL,                     # sim basis
                  ls.subsample = 'strat', ls.nugget=1e-7, ls.m = 1, ls.K = 1, ls.prior=T, ls.parallel=T, make.cluster=T, ls.subsample.size = 250, # length scale estimation
                  bias=F,D=NULL,                                                                      # discrepancy
@@ -716,6 +730,10 @@ flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                   
   if(!is.null(X.sim)){
     if(!is.matrix(X.sim)) # X.sim is a vector indicating scalar response, make it a matrix with 1 column
       X.sim = matrix(X.sim,ncol=1)
+  }
+  if(!is.null(y.ind.sim)){
+    if(!is.matrix(y.ind.sim))
+      y.ind.sim = matrix(y.ind.sim,ncol=1)
   }
   if(!is.null(T.sim)){
     if(!is.matrix(T.sim))
@@ -729,6 +747,10 @@ flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                   
   if(!is.null(X.obs)){
     if(!is.matrix(X.obs))
       X.obs = matrix(X.obs,ncol=1)
+  }
+  if(!is.null(y.ind.obs)){
+    if(!is.matrix(y.ind.obs))
+      y.ind.obs = matrix(y.ind.obs,ncol=1)
   }
   if(!is.null(Y.obs) & !is.list(Y.obs)){
     if(!is.matrix(Y.obs))
@@ -784,7 +806,7 @@ flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                   
   # precomputing and data building including lengthscale estimation
   start.time = proc.time()[3]
   if(verbose){cat('transforming X,T... ')}
-  data$XT.data = transform_xt(X.sim,T.sim,X.obs,T.obs,X.min,X.range)
+  data$XT.data = transform_xt(X.sim,T.sim,X.obs,T.obs,X.min,X.range,do_transform = transform_x)
   if(verbose){cat('done.\n')}
   if(verbose){cat('transforming Y... ')}
   data$Y.data = transform_y(Y.sim,y.ind.sim,Y.obs,y.ind.obs,center,scale,scaletype,responsetype)
@@ -843,7 +865,8 @@ flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                   
   data$time = proc.time()[3] - start.time
   # some useful flags for remembering how the model was called
 
-  data$flags = list(center=center,scale=scale,scaletype=scaletype,responsetype=responsetype,
+  data$flags = list(center=center,scale=scale,scaletype=scaletype,
+                    responsetype=responsetype,bias=bias,
                     rsvd=rsvd,n.pc=n.pc,pct.var=pct.var,
                     ls.nugget=ls.nugget,nug.est=nug.est,ls.K=ls.K,ls.m=ls.m,
                     ls.subsample=ls.subsample,ls.parallel=ls.parallel,ls.subsample.size=ls.subsample.size)
@@ -863,18 +886,26 @@ flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                   
 #' @examples
 #' # See examples folder for R markdown notebooks.
 #'
-flagp_update = function(model,Xnew_orig,Tnew_orig=NULL,Ynew_orig,refit=F){
+flagp_update = function(model,Xnew_orig,Tnew_orig=NULL,Ynew_orig,refit=F,ls.subsample=NULL,ls.m=NULL,ls.K=NULL,seed=NULL,n.pc=NULL){
   if(refit){
+    if(is.null(ls.subsample))
+      ls.subsample = model$flags$ls.subsample
+    if(is.null(ls.m))
+      ls.m = model$flags$ls.m
+    if(is.null(ls.K))
+      ls.K = model$flags$ls.K
+    if(is.null(n.pc))
+      n.pc = model$flags$n.pc
     model = flagp(X.sim = rbind(Xnew_orig,model$XT.data$sim$X$orig),
                   T.sim = rbind(Tnew_orig,model$XT.data$sim$T$orig),
                   X.obs = model$XT.data$obs$X$orig,
                   T.obs = model$XT.data$obs$T$orig,
                   Y.sim = cbind(Ynew_orig,model$Y.data$sim$orig),
-                  y.ind.sim = model$Y.data$sim$ind,
+                  y.ind.sim = model$Y.data$sim$ind,seed=seed,
                   Y.obs = model$Y.data$obs$orig,y.ind.obs = model$Y.data$obs$ind, X.min = model$XT.data$sim$X$min, X.range = model$XT.data$sim$X$range,
-                  center = model$flags$center,scale = model$flags$scale,scaletype = model$flags$scaletype,n.pc = model$flags$n.pc,pct.var = model$flags$pct.var,
-                  nug.est = model$flags$nug.est,ls.subsample=model$flags$ls.subsample,ls.m = model$flags$ls.m,ls.K = model$flags$ls.K,
-                  ls.parallel = model$flags$ls.parallel,ls.subsample.size = model$flags$ls.subsample.size,ls.nugget=model$flags$ls.nugget,verbose = F)
+                  center = model$flags$center,scale = model$flags$scale,scaletype = model$flags$scaletype,n.pc = n.pc,pct.var = model$flags$pct.var,
+                  nug.est = model$flags$nug.est,ls.subsample=ls.subsample,ls.m = ls.m,ls.K = ls.K,
+                  ls.parallel = model$flags$ls.parallel,ls.subsample.size = model$flags$ls.subsample.size,ls.nugget=model$flags$ls.nugget,verbose = F,transform_x=model$XT.data$transformed)
   } else{
     # don't do any rescaling or the sequential design results will be completely unstable
     model$XT.data$sim$X$orig = rbind(Xnew_orig,model$XT.data$sim$X$orig)
