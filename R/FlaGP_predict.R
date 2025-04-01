@@ -508,7 +508,7 @@ sample_predict = function(flagp, model, X.pred.orig, n.samples, return.samples, 
   if(class(model)[1]=='mcmc'){
     stop('Only implemented for MAP models')
   }
-  samples = mvnfast::rmvn(n.samples,model$solutions,model$Cov)
+  samples = mvnfast::rmvn(n.samples,c(model$theta.hat,model$ssq.hat),model$Cov)
 
   flagp = list(flagp)
   returns = list()
