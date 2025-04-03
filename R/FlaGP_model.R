@@ -43,9 +43,13 @@ fit_model_map = function(param,flagp,
                          end.eta=50,
                          delta.method='newGP',start.delta=6,end.delta=50,
                          theta.prior='beta',theta.prior.params=c(2,2),
-                         ssq.prior='hcauchy',ssq.prior.params=c(.5)){
-  theta = param[1:flagp$XT.data$p.t]
-  ssq = param[flagp$XT.data$p.t+1]
+                         ssq.prior='hcauchy',ssq.prior.params=c(.5),loglogit=F){
+
+  if(loglogit){
+    theta = LaplacesDemon::invlogit(param[1:flagp$XT.data$p.t]) # theta passed on logit scale for optimization
+    ssq = exp(param[flagp$XT.data$p.t+1]) # passed in on log scale
+  }
+  
   if(!all(theta < 1 & theta > 0) | ssq<=0){
     return(Inf) # minimization problem
   }

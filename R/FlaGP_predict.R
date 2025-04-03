@@ -508,7 +508,14 @@ sample_predict = function(flagp, model, X.pred.orig, n.samples, return.samples, 
   if(class(model)[1]=='mcmc'){
     stop('Only implemented for MAP models')
   }
-  samples = mvnfast::rmvn(n.samples,c(model$theta.hat,model$ssq.hat),model$Cov)
+
+  # samples in scaled space
+  t_hat_scaled = LaplacesDemon::logit(model$theta.hat)
+  ssq_hat_scaled = exp(model$ssq.hat)
+  samples = mvnfast::rmvn(n.samples,c(t_hat_scaled,ssq_hat_scaled),model$Cov)
+  # convert samples to native space
+  samples[,1:flagp$num$p.t] = LaplacesDemon::invlogit(samples[,1:flagp$num$p.t])
+  samples[,flagp$num$p.t+1] = exp(samples[,flagp$num$p.t+1])
 
   flagp = list(flagp)
   returns = list()
@@ -567,7 +574,7 @@ sample_predict = function(flagp, model, X.pred.orig, n.samples, return.samples, 
         }
       }
     }
-    returns[[k]]$time = proc.time() - start.time
+    returns[[k]]$pred.time = proc.time() - start.time
     returns[[k]]$y.mean = apply(returns[[k]]$y.samp,2:3,mean)
     if(y.conf.int)
       returns[[k]]$y.conf.int = apply(returns[[k]]$y.samp,2:3,quantile,c(.025,.975))
