@@ -97,6 +97,12 @@ map = function(flagp,n.restarts=1,init=NULL,seed=1,
     }
   } else{
     # regular optim
+
+    # put ssq on log scale 
+    init[,p.t+1] = log(init[,p.t+1])
+    # put theta on logit scale
+    init[,1:p.t] = LaplacesDemon::logit(init[,1:p.t])
+
     if(n.restarts>1){
       if(make.cluster){
         cores = min(n.restarts,parallel::detectCores()-1)
@@ -117,6 +123,7 @@ map = function(flagp,n.restarts=1,init=NULL,seed=1,
                                                            theta.prior.params=theta.prior.params,
                                                            ssq.prior=ssq.prior,
                                                            ssq.prior.params=ssq.prior.params,
+                                                           loglogit = T,
                                                            hessian = T)
     } else{
       out = optim(par = init,
@@ -133,23 +140,28 @@ map = function(flagp,n.restarts=1,init=NULL,seed=1,
                    theta.prior.params=theta.prior.params,
                    ssq.prior=ssq.prior,
                    ssq.prior.params=ssq.prior.params,
+                   loglogit = T,
                    hessian = T)
     }
     if(n.restarts>1){
       solutions = matrix(nrow=n.restarts,ncol=p.t+1)
       objectives = rep(0,n.restarts)
       for(i in 1:n.restarts){
-        solutions[i,] = out[[i]]$par
+        solutions[i,] = c(LaplacesDemon::invlogit(out[[i]]$par[1:p.t]),exp(out[[i]]$par[p.t+1]))
         objectives[i] = out[[i]]$value
       }
+
       theta.hat = solutions[which.min(objectives),1:p.t]
       ssq.hat = solutions[which.min(objectives),p.t+1]
-      Cov = chol2inv(chol(out[[which.min(objectives)]]$hessian))
+      
+      H = makePositiveDefinite(out[[which.min(objectives)]]$hessian)
+      Cov = chol2inv(chol(H))
     } else{
-      solutions = out$par
-      theta.hat = out$par[1:p.t]
-      ssq.hat = out$par[p.t+1]
-      Cov = chol2inv(chol(out$hessian)) # not -H because we did minimzation of negll not maximination of ll
+      theta.hat = LaplacesDemon::invlogit(out$par[1:p.t])
+      ssq.hat = exp(out$par[p.t+1])
+      solutions = c(theta.hat,ssq.hat)
+      H = makePositiveDefinite(out$hessian)
+      Cov = chol2inv(chol(H)) # not -H because we did minimzation of negll not maximination of ll
     }
   }
   opt.time = proc.time() - time
