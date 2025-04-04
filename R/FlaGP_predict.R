@@ -154,8 +154,8 @@ mv_delta_predict = function(X.pred.orig,delta,flagp,sample=F,n.samples=1, start=
 #'
 predict.flagp = function(flagp,model=NULL,X.pred.orig=NULL,n.samples=100,samp.ids=NULL,return.samples=F,support='obs',
                          end.eta=50,lagp.delta=F,start.delta=6,end.delta=50,return.eta=F,return.delta=F,
-                         y=T, native=T, y.conf.int=F,
-                         resid.error = F, w.var = T, y.var = F, verbose=T, alpha=.05, X01=F,
+                         y=T, native=T, y.conf.int= T, joint = F,
+                         resid.error = F, w.var = T, y.var = T, y.samp = T, verbose=T, alpha=.05, X01=F,
                          n.pc=flagp$basis$sim$n.pc, parallel = F, make.cluster = F)
 {
   if(parallel & make.cluster){
@@ -166,8 +166,13 @@ predict.flagp = function(flagp,model=NULL,X.pred.orig=NULL,n.samples=100,samp.id
     if(class(model)[1] == 'mcmc'){
       if(verbose)
         cat('MCMC object with covariance given. Drawing predictive samples from posterior distribution.')
-      pred = mcmc_predict(flagp,model,X.pred.orig,samp.ids,n.samples,return.samples,support,end.eta,start.delta,end.delta,
-                          return.eta,return.delta,native,y.conf.int,resid.error,w.var,y.var)
+      # pred = mcmc_predict(flagp,model,X.pred.orig,samp.ids,n.samples,return.samples,support,end.eta,start.delta,end.delta,
+      #                     return.eta,return.delta,native,y.conf.int,resid.error,w.var,y.var)
+      pred = mcmc_predict_joint(flagp, model, X.pred.orig, n.samples, samp.ids,
+                                support, native, joint,
+                                end.eta, start.delta, end.delta,
+                                return.eta, return.delta,
+                                resid.error, y.var, y.samp, y.conf.int, alpha)
     } else if(class(model)[1] == 'map'){
       if(is.null(model$Cov)){
         if(verbose)
@@ -253,7 +258,6 @@ map_predict = function(flagp,map,X.pred.orig,n.samples,return.samples,support,
   } else{
     s2 = sqrt(.Machine$double.eps)
   }
-  Sig_y = diag(s2,n.y)
   if(!native){
     ysd = 1
     ym = 1
@@ -312,59 +316,125 @@ map_predict = function(flagp,map,X.pred.orig,n.samples,return.samples,support,
         }
       }
     }
-
-    # if(n.samples>1){
-    #   eps = sqrt(.Machine$double.eps)*diag(n.y)
-    #   eta.samp = array(0,dim=c(n.y,n.samples,n.pred))
-    #   delta.samp = array(0,dim=c(n.y,n.samples,n.pred))
-    #
-    #   start.time = proc.time()
-    #   v = mv_delta_predict(X.pred.orig,map$delta,flagp,F,start=start.delta,end=end.delta)
-    #   returns$time = returns$time + proc.time() - start.time
-    #
-    #   for(j in 1:n.pred){
-    #     eta.samp[,,j] = t(mvnfast::rmvn(n.samples,B%*%w$mean[,j,drop=F],B%*%tcrossprod(diag(w$scale[,j]*w$df/(w$df-2),nrow=n.pc),B) + eps)) * ysd + ym
-    #     if(map$delta$method%in%c('lagp','newGP')){
-    #       delta.samp[,,j] = t(mvnfast::rmvn(n.samples,D%*%v$mean[,j,drop=F],D%*%tcrossprod(diag(v$scale[,j]*v$df/(v$df-2),nrow=n.pc.delta),D) + Sig_y)) * ysd # variance is scale of t * df/(df-2)
-    #     } else{
-    #       delta.samp[,,j] = t(mvnfast::rmvn(n.samples,D%*%v$mean[,j,drop=F],D%*%tcrossprod(diag(v$var[,j] + s2,nrow=n.pc.delta),D)  + Sig_y)) * ysd
-    #     }
-    #   }
-    #   if(y){
-    #     returns$y.samp = eta.samp + delta.samp
-    #     returns$y.mean = apply(returns$y.samp,c(1,3),mean) # do i need to compute this or just add eta.mean to delta.mean?
-    #     # if(y.conf.int)
-    #     #   returns$y.conf.int = apply(returns$y.samp,c(1,3),quantile,c(.025,.975))
-    #     if(y.var | y.conf.int)
-    #       returns$y.var = apply(returns$y.samp,c(1,3),var)
-    #   }
-    #
-    #   returns$eta.mean = apply(eta.samp,c(1,3),mean)
-    #   returns$delta.mean = apply(delta.samp,c(1,3),mean)
-    #   if(!return.samples)
-    #     returns$y.samp = NULL
-    # } else{
-    #   eta = array(0,dim=c(n.y,n.pred))
-    #   delta = array(0,dim=c(n.y,n.pred))
-    #
-    #   start.time = proc.time()
-    #   v = mv_delta_predict(X.pred.orig,map$delta,flagp,F,start=start.delta,end=end.delta)
-    #   returns$time = returns$time + proc.time() - start.time
-    #
-    #   for(j in 1:n.pred){
-    #     eta[,j] = t(B%*%w$mean[,j,drop=F]) * ysd + ym
-    #     delta[,j] = t(D%*%v$mean[,j,drop=F]) * ysd
-    #   }
-    #   returns$y.mean = eta + delta
-    #   returns$eta.mean = eta
-    #   returns$delta.mean = delta
-    # }
   }
   if(y.conf.int){
     n.y = flagp$Y.data$sim$n.y
     returns$y.conf.int = array(dim=c(2,n.y,n.pred))
     returns$y.conf.int[1,,] = qnorm(alpha/2,returns$y.mean,sqrt(returns$y.var))
     returns$y.conf.int[2,,] = qnorm(1-(alpha/2),returns$y.mean,sqrt(returns$y.var))
+  }
+  return(returns)
+}
+
+mcmc_predict_joint = function(flagp, mcmc, X.pred.orig=NULL, n.samples=length(mcmc$ssq.samp), samp.ids=as.integer(seq(1,length(mcmc$ssq.samp),n.samples)),
+                              support='sim', native=T, joint = F,
+                              end.eta=min(flagp$num$m-1,50), start.delta = NULL, end.delta = NULL,
+                              return.eta = F, return.delta = F,
+                              resid.error = F, y.var = T, y.samp = T, y.conf.int = T, alpha = .05){
+  get_ymean = function(B,wmean,ysd,ym,bias=F,D=NULL,vmean=NULL){
+    mean = B%*%wmean
+    if(!is.null(D) & !is.null(vmean)){
+      mean = mean + D%*%vmean
+    }
+    return(ysd * mean + ym)
+  }
+  get_yvar = function(B,wvar,bias=F,D=NULL,vvar=NULL){
+    Sigma_w = B%*%tcrossprod(diag(wvar),B)
+    if(bias){
+      Sigma_v = D%*%tcrossprod(diag(vvar,nrow=ncol(D)),D)
+    } else{
+      Sigma_v = 0
+    }
+    return(list(Sigma_w = Sigma_w, Sigma_v = Sigma_v))
+  }
+  get_ysamp = function(B,wmean,wvar,s2,ysd,ym,n.samples,bias=F,D=NULL,vvar=NULL){
+    Sigma_w = B%*%tcrossprod(diag(wvar,nrow=n.pc),B)
+    if(bias){
+      Sigma_v = D%*%tcrossprod(diag(vvar,nrow=ncol(D)),D)
+    } else{
+      Sigma_v = Sigma_w * 0
+    }
+    diag(Sigma_w) = diag(Sigma_w) + s2  # add error variance
+    t(t(mvnfast::rmvn(n.samples,B%*%wmean,Sigma_w+Sigma_v)) * ysd + ym)
+  }
+
+  returns = list()
+  if(support=='obs'){
+    B = flagp$basis$obs$B
+    D = flagp$basis$obs$D
+    ym = flagp$Y.data$obs$mean
+    ysd = flagp$Y.data$obs$sd
+    n.y = flagp$Y.data$obs$n.y
+  } else{
+    B = flagp$basis$sim$B
+    D = flagp$basis$sim$D
+    ym = flagp$Y.data$sim$mean
+    ysd = flagp$Y.data$sim$sd
+    n.y = flagp$Y.data$sim$n.y
+  }
+  n.pc = ncol(B)
+  bias = flagp$bias
+
+  if(!native){
+    ym = 0
+    ysd = 1
+  }
+  if(is.null(samp.ids)){
+    if(n.samples == 0)
+      n.samples = 1
+    samp.ids = as.integer(seq(1,length(mcmc$ssq.samp), length.out = n.samples))
+  } else{
+    n.samples = length(samp.ids)
+  }
+  n.pred = ifelse(!is.null(X.pred.orig),nrow(X.pred.orig),1)
+  t.pred = t(t(mcmc$t.samp[samp.ids,,drop=F]) * flagp$XT.data$sim$T$range + flagp$XT.data$sim$T$min)
+  ssq.samp = mcmc$ssq.samp[samp.ids]
+
+  returns$y.mean.samp = array(0,dim=c(n.samples,n.y,n.pred))
+  if(y.var)
+    returns$y.var.samp = array(0,dim=c(n.samples,n.y,n.pred))
+  if(y.samp)
+    returns$y.samp = array(0,dim=c(n.samples,n.y,n.pred))
+
+  ptm = proc.time()[3]
+  for(i in 1:n.samples){
+    # get w
+    w = predict_w(flagp,X.pred.orig,t.pred[i,],sample=F,w.var=T,end=end.eta,n.pc=n.pc)
+    # get v
+    if(flagp$bias){
+      v = FlaGP:::mv_delta_predict(X.pred.orig,mcmc$delta[[i]],flagp,sample=F,start=start.delta,end=end.delta)
+    } else{
+      v = NULL
+    }
+    if(resid.error){
+      Sigma_y = diag(ssq.samp[i],n.y)
+    } else{
+      Sigma_y = 0
+    }
+    # get mean
+    returns$y.mean.samp[i,,] = get_ymean(B,w$mean,ysd,ym,bias,D,v$mean)
+
+    if(y.var | y.samp){
+      for(j in 1:n.pred){
+        # get variance
+        var = get_yvar(B,w$var[,j],bias,D,v$var[,j])
+        Sigma = ysd^2*(var$Sigma_w + var$Sigma_v + Sigma_y)
+        if(joint){
+          CholSigma = chol(Sigma)
+        } else{
+          CholSigma = diag(sqrt(diag(Sigma)))
+        }
+        returns$y.var.samp[i,,j] = diag(Sigma)
+        # get a sample
+        returns$y.samp[i,,j] = mvnfast::rmvn(1,returns$y.mean.samp[i,,j],sigma = CholSigma,isChol = T)
+      }
+    }
+  }
+  returns$pred.time = ptm - proc.time()[3]
+  returns$y.mean = apply(returns$y.samp,2:3,mean)
+  returns$y.var = apply(returns$y.samp,2:3,var)
+  if(y.conf.int){
+    returns$y.conf.int = apply(returns$y.samp,2:3,quantile,c(alpha/2,1-alpha/2))
   }
   return(returns)
 }
@@ -419,7 +489,7 @@ mcmc_predict = function(flagp ,mcmc, X.pred.orig, samp.ids, n.samples, return.sa
 
       if(flagp[[k]]$bias){
         # Biased prediction add delta model
-        v = FlaGP:::mv_delta_predict(X.pred.orig,mcmc$delta[[i]],flagp[[k]],sample=T,n.samples=1,start=start.eta,end=end.eta)
+        v = FlaGP:::mv_delta_predict(X.pred.orig,mcmc$delta[[i]],flagp[[k]],sample=T,n.samples=1,start=start.delta,end=end.delta)
         returns[[k]]$delta.samp[i,,] = D%*%drop(v$sample) # if we scaled y.resid before fitting v, we probably need to scale again here
       }
     }
@@ -431,7 +501,7 @@ mcmc_predict = function(flagp ,mcmc, X.pred.orig, samp.ids, n.samples, return.sa
 
       if(flagp[[k]]$bias){
         # Biased prediction add delta model
-        # v = FlaGP:::mv_delta_predict(X.pred.orig,mcmc$delta[[i]],flagp[[k]],sample=T,n.samples=1,start=start.eta,end=end.eta)
+        # v = FlaGP:::mv_delta_predict(X.pred.orig,mcmc$delta[[i]],flagp[[k]],sample=T,n.samples=1,start=start.delta,end=end.delta)
         # returns[[k]]$delta.samp[i,,] = D%*%drop(v$sample) # if we scaled y.resid before fitting v, we probably need to scale again here
         for(j in 1:n.pred){
           if(resid.error){
@@ -542,7 +612,7 @@ sample_predict = function(flagp, model, X.pred.orig, n.samples, return.samples, 
 
       if(flagp[[k]]$bias){
         # Biased prediction add delta model
-        v = FlaGP:::mv_delta_predict(X.pred.orig,model$delta,flagp[[k]],sample=T,n.samples=1,start=start.eta,end=end.eta)
+        v = FlaGP:::mv_delta_predict(X.pred.orig,model$delta,flagp[[k]],sample=T,n.samples=1,start=start.delta,end=end.delta)
         returns[[k]]$delta.samp[i,,] = D%*%drop(v$sample) # if we scaled y.resid before fitting v, we probably need to scale again here
         for(j in 1:n.pred){
           if(resid.error){
@@ -567,7 +637,7 @@ sample_predict = function(flagp, model, X.pred.orig, n.samples, return.samples, 
         }
       }
     }
-    returns[[k]]$time = proc.time() - start.time
+    returns[[k]]$pred.time = proc.time() - start.time
     returns[[k]]$y.mean = apply(returns[[k]]$y.samp,2:3,mean)
     if(y.conf.int)
       returns[[k]]$y.conf.int = apply(returns[[k]]$y.samp,2:3,quantile,c(.025,.975))
