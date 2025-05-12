@@ -278,7 +278,7 @@ map_predict = function(flagp,map,X.pred.orig,n.samples,return.samples,support,
   # emulator predictions
   start.time = proc.time()[3]
   w = predict_w(flagp,X.pred.orig,theta,end=end.eta,w.var=w.var,n.pc=n.pc)
-  returns$pred.time = proc.time()[3] - start.time
+  returns$time = proc.time()[3] - start.time
 
   if(!flagp$bias & y){
     # mean
@@ -300,9 +300,9 @@ map_predict = function(flagp,map,X.pred.orig,n.samples,return.samples,support,
     }
   } else if(flagp$bias){
     # biased prediction
-    start.time = proc.time()
+    start.time = proc.time()[3]
     v = mv_delta_predict(X.pred.orig,map$delta,flagp,F,start=start.delta,end=end.delta)
-    returns$time = returns$time + proc.time() - start.time
+    returns$time = returns$time + proc.time()[3] - start.time
 
     # mean
     eta = B%*%w$mean * ysd + ym
@@ -441,7 +441,7 @@ mcmc_predict_joint = function(flagp, mcmc, X.pred.orig=NULL, n.samples=length(mc
       }
     }
   }
-  returns$pred.time = ptm - proc.time()[3]
+  returns$time = ptm - proc.time()[3]
   returns$y.mean = apply(returns$y.samp,2:3,mean)
   returns$y.var = apply(returns$y.samp,2:3,var)
   if(y.conf.int){
@@ -492,7 +492,7 @@ mcmc_predict = function(flagp ,mcmc, X.pred.orig, samp.ids, n.samples, return.sa
     returns[[k]]$eta.samp = array(0,dim=c(n.samples,n.y,n.pred))
     if(flagp[[k]]$bias)
       returns[[k]]$delta.samp = array(0,dim=c(n.samples,n.y,n.pred))
-    start.time = proc.time()
+    start.time = proc.time()[3]
     for(i in 1:n.samples){
       # just get w, v predictions for timing
       w = predict_w(flagp[[k]],X.pred.orig,t.pred[i,],sample=T,end=end.eta,n.pc=flagp[[k]]$basis$sim$n.pc)
@@ -504,7 +504,7 @@ mcmc_predict = function(flagp ,mcmc, X.pred.orig, samp.ids, n.samples, return.sa
         returns[[k]]$delta.samp[i,,] = D%*%drop(v$sample) # if we scaled y.resid before fitting v, we probably need to scale again here
       }
     }
-    returns[[k]]$pred.time = proc.time() - start.time
+    returns[[k]]$time = proc.time()[3] - start.time
 
     for(i in 1:n.samples){
       # w = predict_w(flagp[[k]],X.pred.orig,t.pred[i,],sample=T,end=end.eta,n.pc=flagp[[k]]$basis$sim$n.pc)
@@ -623,7 +623,7 @@ sample_predict = function(flagp, model, X.pred.orig, n.samples, return.samples, 
     returns[[k]]$eta.samp = array(0,dim=c(n.samples,n.y,n.pred))
     if(flagp[[k]]$bias)
       returns[[k]]$delta.samp = array(0,dim=c(n.samples,n.y,n.pred))
-    start.time = proc.time()
+    start.time = proc.time()[3]
     for(i in 1:n.samples){
       w = predict_w(flagp[[k]],X.pred.orig,t.pred[i,],sample=T,end=end.eta,n.pc=flagp[[k]]$basis$sim$n.pc)
       returns[[k]]$eta.samp[i,,] = B%*%drop(w$sample)
@@ -655,7 +655,7 @@ sample_predict = function(flagp, model, X.pred.orig, n.samples, return.samples, 
         }
       }
     }
-    returns[[k]]$pred.time = proc.time() - start.time
+    returns[[k]]$time = proc.time()[3] - start.time
     returns[[k]]$y.mean = apply(returns[[k]]$y.samp,2:3,mean)
     if(y.conf.int)
       returns[[k]]$y.conf.int = apply(returns[[k]]$y.samp,2:3,quantile,c(.025,.975))
@@ -705,9 +705,9 @@ em_only_predict = function(flagp, X.pred.orig, n.samples, support, end.eta, y, n
 
   n.pred = nrow(X.pred.orig)
   # get predictive samples of w at X.pred.orig
-  start.time = proc.time()
+  start.time = proc.time()[3]
   w = predict_w(flagp,X.pred.orig,end = end.eta,sample = ifelse(n.samples>0,T,F),n.samples = n.samples, w.var=w.var, n.pc=n.pc, parallel = parallel)
-  returns$pred.time = proc.time() - start.time
+  returns$time = proc.time()[3] - start.time
   returns$w = w
 
   sd = 1
