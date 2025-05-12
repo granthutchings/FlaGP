@@ -7,12 +7,12 @@ mcmc_mh = function(flagp,
                    end.eta=50,
                    delta.method='newGP',start.delta=6,end.delta=50,
                    theta.prior='beta',theta.prior.params=c(2,2),
-                   ssq.prior='hcauchy',ssq.prior.params=c(.5),
+                   ssq.prior='hcauchy',ssq.prior.params=c(.1),
                    prev.samples=NULL,
                    recalc.llh=F,
                    sample=as.logical(ifelse(flagp$bias,F,T)),
-                   verbose=T){
-  llh = function(par,full=F,opt=F,...){
+                   verbose=T,loglogit=F,single_site=F){
+  llh = function(par,full=F,opt=F,sample=T,...){
     t.curr = par[1:flagp$XT.data$p.t]
     ssq.curr = par[flagp$XT.data$p.t+1]
     if(ssq.curr<0 | any(t.curr<0) | any(t.curr>1)){
@@ -26,7 +26,7 @@ mcmc_mh = function(flagp,
       llt = fit_model(t.curr,ssq.curr,flagp,F,F,end.eta,delta.method,start.delta,end.delta,F,
                       theta.prior,theta.prior.params,ssq.prior,ssq.prior.params)
     } else{
-      llt = fit_model(t.curr,ssq.curr,flagp,F,sample,end.eta,delta.method,start.delta,end.delta,F,
+      llt = fit_model(t.curr,ssq.curr,flagp,F,sample=sample,end.eta,delta.method,start.delta,end.delta,F,
                       theta.prior,theta.prior.params,ssq.prior,ssq.prior.params)
     }
 
@@ -36,27 +36,102 @@ mcmc_mh = function(flagp,
       return(llt$ll)
     }
   }
-  adapt.par[4] = adapt.par[4]/n.samples
-  if(recalc.llh){
-    flagp$prior = list(delta.method=delta.method,start.delta=start.delta,end.delta=end.delta,
-                       theta.prior=theta.prior,theta.prior.params=theta.prior.params,
-                       ssq.prior=ssq.prior,ssq.prior.params=ssq.prior.params)
-    Metro_Hastings_Stochastic(flagp,llh,c(t.init,ssq.init),prop.cov,NULL,n.samples,n.burn,thin,adapt.par,recalc.llh,!verbose)
+
+  flagp$prior = list(delta.method=delta.method,start.delta=start.delta,end.delta=end.delta,
+                     theta.prior=theta.prior,theta.prior.params=theta.prior.params,
+                     ssq.prior=ssq.prior,ssq.prior.params=ssq.prior.params)
+  if(loglogit){
+    if(single_site){
+      cat('Single-Site Metropolis on unconstrained (logit/log transformed) parameter space\n')
+      mcmc = Metro_Hastings_Stochastic_Logit_OneAtATime(flagp,llh,c(t.init,ssq.init),prop.cov,NULL,n.samples,n.burn,thin,adapt.par,recalc.llh,sample,!verbose)
+    } else{
+      cat('Joint Metropolis on unconstrained (logit/log transformed) parameter space\n')
+      mcmc = Metro_Hastings_Stochastic_Logit(flagp,llh,c(t.init,ssq.init),prop.cov,NULL,n.samples,n.burn,thin,adapt.par,recalc.llh,sample,!verbose)
+    }
   } else{
-    # MHadaptive::Metro_Hastings(llh,c(t.init,ssq.init),prop.cov,NULL,n.samples,n.burn,adapt.par,!verbose)
-    flagp$prior = list(delta.method=delta.method,start.delta=start.delta,end.delta=end.delta,
-                       theta.prior=theta.prior,theta.prior.params=theta.prior.params,
-                       ssq.prior=ssq.prior,ssq.prior.params=ssq.prior.params)
-    Metro_Hastings_Stochastic(flagp,llh,c(t.init,ssq.init),prop.cov,NULL,n.samples,n.burn,thin,adapt.par,recalc.llh,!verbose)
+    cat('Sampling in bounded space\n')
+    mcmc = Metro_Hastings_Stochastic(flagp,llh,c(t.init,ssq.init),prop.cov,NULL,n.samples,n.burn,thin,adapt.par,recalc.llh,sample,!verbose)
   }
+
+  # store some other stuff
+  mcmc$dat = list(
+    loglogit = loglogit,
+    prior = flagp$prior,
+    recalc.llh = recalc.llh,
+    sample = sample,
+    end.eta = end.eta
+  )
+
+  return(mcmc)
+}
+
+mcmc_mh_add = function(mcmc,flagp,verbose,n.samples=10000){
+  llh = function(par,full=F,opt=F,sample=T,...){
+    p.t = length(par) - 1
+    t.curr = par[1:p.t]
+    ssq.curr = par[p.t+1]
+    if(ssq.curr<0 | any(t.curr<0) | any(t.curr>1)){
+      if(full){
+        return(list(ll=-Inf))
+      } else{
+        return(-Inf)
+      }
+    }
+    if(opt){
+      llt = fit_model(t.curr,ssq.curr,flagp,F,F,flagp$prior$end.eta,flagp$prior$delta.method,flagp$prior$start.delta,end.delta,F,
+                      flagp$prior$theta.prior,flagp$prior$theta.prior.params,flagp$prior$ssq.prior,flagp$prior$ssq.prior.params)
+    } else{
+      llt = fit_model(t.curr,ssq.curr,flagp,F,sample,flagp$prior$end.eta,flagp$prior$delta.method,flagp$prior$start.delta,flagp$prior$end.delta,F,
+                      flagp$prior$theta.prior,flagp$prior$theta.prior.params,flagp$prior$ssq.prior,flagp$prior$ssq.prior.params)
+    }
+
+    if(full){
+      return(llt)
+    } else{
+      return(llt$ll)
+    }
+  }
+  n.samp.prev = nrow(mcmc$t.samp)
+  t.init = c(mcmc$t.samp[n.samp.prev,])
+  ssq.init = mcmc$ssq.samp[n.samp.prev]
+  prop.cov = mcmc$prop.cov
+  recalc.llh = mcmc$dat$recalc.llh
+  sample = mcmc$dat$sample
+  loglogit = mcmc$dat$loglogit
+  flagp$prior = mcmc$dat$prior
+  flagp$prior$end.eta = mcmc$dat$end.eta
+  n.burn = 0
+  thin = 1
+  adapt.par = c(0,0,0,0)
+
+  if(loglogit){
+    cat('Sampling unconstrained transformed space\n')
+    mcmc_new = Metro_Hastings_Stochastic_Logit(flagp,llh,c(t.init,ssq.init),prop.cov,NULL,n.samples,n.burn,thin,adapt.par,recalc.llh,sample,!verbose)
+  } else{
+    cat('Sampling in bounded space\n')
+    mcmc_new = Metro_Hastings_Stochastic(flagp,llh,c(t.init,ssq.init),prop.cov,NULL,n.samples,n.burn,thin,adapt.par,recalc.llh,sample,!verbose)
+  }
+
+  mcmc$t.samp = rbind(mcmc$t.samp,mcmc_new$t.samp)
+  mcmc$ssq.samp = c(mcmc$ssq.samp,mcmc_new$ssq.samp)
+  mcmc$ll.samp = c(mcmc$ll.samp,mcmc_new$ll.samp)
+  mcmc$eta = c(mcmc$eta,mcmc_new$eta)
+  mcmc$delta = c(mcmc$delta,mcmc_new$delta)
+  mcmc$prop.cov = mcmc_new$prop.cov
+  mcmc$time = mcmc$time + mcmc_new$time
+  mcmc$acpt.ratio = ((mcmc$acpt.ratio * mcmc$n.samples) + (mcmc_new$acpt.ratio * mcmc_new$n.samples)) / (mcmc$n.samples + mcmc_new$n.samples)
+  mcmc$n.samples = mcmc$n.samples + mcmc_new$n.samples
+  mcmc$samp.all = rbind(mcmc$samp.all,mcmc_new$samp.all)
+  return(mcmc)
 }
 # addapted MHadaptive::Metro_Hastings for stochastic llh and fast resampling of llh
 Metro_Hastings_Stochastic = function (flagp, li_func, pars, prop_sigma = NULL, par_names = NULL,
-                                      iterations = 50000, burn_in = 1000, thin = 1, adapt_par = c(100, 20, 0.5, 0.75), recalc = TRUE, quiet = FALSE, ...)
+                                      iterations = 50000, burn_in = 1000, thin = 1, adapt_par = c(100, 20, 0.5, 0.75), recalc = TRUE, sample = TRUE, quiet = FALSE, ...)
 {
   ptm = proc.time()[3]
-  sample = as.logical(ifelse(flagp$bias,F,T))
-  if (!is.finite(li_func(pars, ...)))
+  if(is.null(sample))
+    sample = as.logical(ifelse(flagp$bias,F,T))
+  if (!is.finite(li_func(pars, sample=sample,...)))
     stop("Seed parameter values <pars> are not in the defined parameter space.  Try new starting values for <pars>.")
   if (is.null(par_names))
     par_names <- letters[1:length(pars)]
@@ -68,7 +143,7 @@ Metro_Hastings_Stochastic = function (flagp, li_func, pars, prop_sigma = NULL, p
   if (is.null(prop_sigma)) {
     if (length(pars) != 1) {
       fit <- optim(pars, li_func, control = list(fnscale = -1),
-                   hessian = TRUE, opt=T,...)
+                   hessian = TRUE, opt=T, sample=sample,...)
       fisher_info <- solve(-fit$hessian)
       prop_sigma <- sqrt(diag(fisher_info))
       prop_sigma <- diag(prop_sigma)
@@ -77,9 +152,10 @@ Metro_Hastings_Stochastic = function (flagp, li_func, pars, prop_sigma = NULL, p
       prop_sigma <- 1 + pars/2
     }
   }
-  prop_sigma <- makePositiveDefinite(prop_sigma)
+  I = diag(1e-8,length(pars))
+  prop_sigma <- prop_sigma + I #makePositiveDefinite(prop_sigma)
   mu <- pars
-  pi_X <- li_func(pars, full=T, ...)
+  pi_X <- li_func(pars, full=T, sample=sample,...)
   k_X <- pars
   trace <- array(dim = c(iterations, length(pars)))
   llh = array(dim = iterations)
@@ -87,10 +163,9 @@ Metro_Hastings_Stochastic = function (flagp, li_func, pars, prop_sigma = NULL, p
   announce <- floor(seq(iterations/10, iterations, length.out = 10))
   eta = delta = list()
   for (i in 1:iterations) {
-    # cat(i,' ')
     k_Y <- mvnfast::rmvn(1, mu = k_X, sigma = prop_sigma)
     # cat('prop:',round(k_Y,2),' ')
-    pi_Y <- li_func(k_Y, full=T,...)
+    pi_Y <- li_func(k_Y, full=T, sample=sample,...)
     # cat('prop llh:',round(pi_Y,2),' ')
     a_X_Y = (pi_Y$ll) - (pi_X$ll)
     if (is.nan(a_X_Y))
@@ -121,19 +196,19 @@ Metro_Hastings_Stochastic = function (flagp, li_func, pars, prop_sigma = NULL, p
     llh[i] = pi_X$ll
     eta[[i]] = pi_X$eta
     delta[[i]] = pi_X$delta
+
     if (i > adapt_par[1] && i%%adapt_par[2] == 0 && i < (adapt_par[4] * iterations)) {
       len <- floor(i * adapt_par[3]):i
       x <- trace[len, ]
       N <- length(len)
-      p_sigma <- (N - 1) * var(x)/N
-      p_sigma <- makePositiveDefinite(p_sigma)
+      p_sigma <- (N - 1) * var(x)/N ## SLOW
+      # p_sigma <- makePositiveDefinite(p_sigma) ## can fail
+      p_sigma = p_sigma + I
       if (!(0 %in% p_sigma))
         prop_sigma <- p_sigma
     }
     if (!quiet && i %in% announce)
-      print(paste("updating: ", i/iterations * 100, "%",
-                  sep = ""))
-    # if(i %% 10 == 0){save(trace,file='~/fuelsgen/examples/LGCP/tmp.RData')}
+      cat(paste0("  updating: ", i/iterations * 100, "%"," acceptance rate: ",round(mean(accept[1:i]),3),'\n'))
   }
   keep = seq(burn_in,iterations,thin)
   trace_all = trace
@@ -156,73 +231,123 @@ Metro_Hastings_Stochastic = function (flagp, li_func, pars, prop_sigma = NULL, p
   return(val)
 }
 
-mcmc_ld = function(flagp,
-                   t.init=rep(.5,flagp$num$p.t),
-                   ssq.init=.01,
-                   prop.cov=diag((.5/3)^2,flagp$num$p.t+1),
-                   n.samples=10000,n.burn=1000,thin=1,
-                   adapt.par = c(100,50,.5,1000),
-                   end.eta=50,
-                   delta.method='newGP',start.delta=6,end.delta=50,
-                   theta.prior='beta',theta.prior.params=c(2,2),
-                   ssq.prior='hcauchy',ssq.prior.params=c(.5),
-                   sample=as.logical(ifelse(flagp$bias,F,T)),
-                   verbose=T,algorithm='ram'){
-  MyData = list(flagp = flagp,
-              t.init = t.init,
-              ssq.init = ssq.init,
-              prop.cov = prop.cov,
-              n.samples = n.samples,
-              adapt.par = adapt.par,
-              end.eta = end.eta,
-              delta.method = delta.method,
-              start.delta = start.delta,
-              end.delta = end.delta,
-              theta.prior = theta.prior,
-              theta.prior.params = theta.prior.params,
-              ssq.prior = ssq.prior,
-              ssq.prior.params = ssq.prior.params,
-              sample = sample,
-              verbose = verbose)
-  MyData$mon.names = "LP"
-  parm.names <- LaplacesDemon::as.parm.names(list(theta=rep(0,flagp$num$p.t), sigma2=0))
-  MyData$parm.names = parm.names
-  # pos.theta <- grep("theta", parm.names)
-  # pos.sigma2 <- grep("sigma2", parm.names)
-  # MyData$pos.beta = pos.theta
-  # MyData$pos.sigma = pos.sigma2
-  MyData$N = flagp$Y.data$m
-  stopifnot(LaplacesDemon::is.data(MyData))
-  Model = function(parm, Data){
-
-    t.curr = parm[1:Data$flagp$num$p.t]
-    ssq.curr = parm[Data$flagp$num$p.t+1]
-    if(ssq.curr<0 | any(t.curr<0) | any(t.curr>1)){
-      llt = list(ll=-Inf)
+# MCMC sampling with theta on logit scale and s2 on log scale - in theory, sampling on the unconstrained space will improve things.
+# in practice, covariance addaptation can be really sensitive in this space, blowing up so samples are always at
+# the boundary
+Metro_Hastings_Stochastic_Logit = function (flagp, li_func, pars, prop_sigma = NULL, par_names = NULL,
+                                      iterations = 50000, burn_in = 1000, thin = 1, adapt_par = c(100, 20, 0.5, 0.75), recalc = TRUE, sample = TRUE, quiet = FALSE, ...)
+{
+  transform = function(pars,inv=F){
+    p.t = length(pars)-1
+    if(inv){
+      pars[1:p.t] = invlogit(pars[1:p.t])
+      pars[p.t+1] = exp(pars[p.t+1])
     } else{
-      llt = fit_model(t.curr,ssq.curr,Data$flagp,F,Data$sample,Data$end.eta,Data$delta.method,Data$start.delta,Data$end.delta,F,
-                      Data$theta.prior,Data$theta.prior.params,Data$ssq.prior,Data$ssq.prior.params)
+      pars[1:p.t] = logit(pars[1:p.t])
+      pars[p.t+1] = log(pars[p.t+1])
     }
-    LP = llt$ll
-    Modelout = list(LP=LP,Dev=-2*LP,Monitor=LP,yhat=llt$eta$y.resid,parm=parm)
-    return(Modelout)
+    return(pars)
   }
-  if(algorithm=='ram'){
-    trace(LaplacesDemon::LaplacesDemon, edit = T)
-    Fit = LaplacesDemon::LaplacesDemon(Model, Data=MyData, Initial.Values = c(t.init,ssq.init),
-                                       Covar=NULL, Iterations=MyData$n.samples, Status=100, Thinning=thin,
-                                       Algorithm="RAM", Specs=list(alpha.star=0.234, B=NULL, Dist="N",
-                                                                   gamma=0.66, n=0))
-  } else if(algorithm=='ess'){
-    Fit = LaplacesDemon::LaplacesDemon(Model, Data=MyData, Initial.Values = c(t.init,ssq.init),
-                                       Covar=NULL, Iterations=MyData$n.samples, Status=1000, Thinning=thin,
-                                       Algorithm="ESS", Specs=list(B=NULL), Debug = list(DB.Model=FALSE))
-  } else{
-    stop('Algorithm not implemented.')
+  jacobian = function(pars,transformed=F){
+    if(transformed)
+      pars = transform(pars,inv=T) # pars need to be on regular scale
+    sum(log(pars[1:p.t]*(1-pars[1:p.t]))) + log(pars[p.t+1])
   }
+  ptm = proc.time()[3]
+  if(is.null(sample))
+    sample = as.logical(ifelse(flagp$bias,F,T))
+  if (!is.finite(li_func(pars, sample=sample,...)))
+    stop("Seed parameter values <pars> are not in the defined parameter space.  Try new starting values for <pars>.")
+  if (is.null(par_names))
+    par_names <- letters[1:length(pars)]
+  if (!is.null(dim(prop_sigma))) {
+    if ((dim(prop_sigma)[1] != length(pars) || dim(prop_sigma)[2] !=
+         length(pars)) && !is.null(prop_sigma))
+      stop("prop_sigma not of dimension length(pars) x length(pars)")
+  }
+  if (is.null(prop_sigma)) {
+    if (length(pars) != 1) {
+      fit <- optim(pars, li_func, control = list(fnscale = -1),
+                   hessian = TRUE, opt=T, sample=sample,...)
+      fisher_info <- solve(-fit$hessian)
+      prop_sigma <- sqrt(diag(fisher_info))
+      prop_sigma <- diag(prop_sigma)
+    }
+    else {
+      prop_sigma <- 1 + pars/2
+    }
+  }
+  I = diag(1e-8,length(pars))
+  prop_sigma <- prop_sigma + I #makePositiveDefinite(prop_sigma)
 
-  return(Fit)
+  p.t = length(pars)-1
+  pi_X <- li_func(pars, full=T, sample=sample,...)
+  pi_X$ll = pi_X$ll + jacobian(pars,transformed=F)
+  k_X <- transform(pars)
+  trace <- array(dim = c(iterations, length(pars)))
+  llh = array(dim = iterations)
+  accept = numeric(iterations)
+  announce <- floor(seq(iterations/10, iterations, length.out = 10))
+  eta = delta = list()
+  for (i in 1:iterations) {
+    k_Y <- mvnfast::rmvn(1, mu = k_X, sigma = prop_sigma)
+    pi_Y <- li_func(transform(k_Y,inv=T), full=T, sample=sample,...)
+    pi_Y$ll = pi_Y$ll + jacobian(k_Y,transformed=T)
+
+    a_X_Y = (pi_Y$ll) - (pi_X$ll)
+    if (is.nan(a_X_Y))
+      a_X_Y <- -Inf
+    if (log(runif(1, 0, 1)) <= a_X_Y) {
+      k_X = k_Y
+      pi_X = pi_Y
+      accept[i] = 1
+    } else{
+      # if not accept recalc current state due to stochastic llh function
+      # resample w,v much faster than recalculating llh
+      if(recalc){
+        pi_X$eta = resample_w(pi_X$eta$w,flagp$Y.data$obs$trans,flagp$basis$obs$B,flagp$prior$ssq.prior.params)
+        if(flagp$bias){
+          pi_X$delta = resample_v(pi_X$delta,flagp$basis$obs$D,pi_X$eta$y.resid)
+        }
+        pi_X$ll = compute_ll(pi_X$theta,pi_X$ssq,pi_X$eta,pi_X$delta,sample,flagp,
+                             flagp$prior$theta.prior,flagp$prior$theta.prior.params,
+                             flagp$prior$ssq.prior,flagp$prior$ssq.prior.params) + jacobian(k_X,transformed = T)
+      }
+    }
+    trace[i, ] <- k_X
+    llh[i] = pi_X$ll
+    eta[[i]] = pi_X$eta
+    delta[[i]] = pi_X$delta
+
+    if (i > adapt_par[1] && i%%adapt_par[2] == 0 && i < (adapt_par[4] * iterations)) {
+      len <- floor(i * adapt_par[3]):i
+      x <- trace[len, ]
+      N <- length(len)
+      p_sigma <- (N - 1) * var(x)/N ## SLOW
+      # p_sigma <- makePositiveDefinite(p_sigma) ## can fail
+      p_sigma = p_sigma + I
+      if (!(0 %in% p_sigma))
+        prop_sigma <- p_sigma
+    }
+    if (!quiet && i %in% announce)
+      cat(paste0(". updating: ", i/iterations * 100, "%"," acceptance rate: ",round(mean(accept[1:i]),3),'\n'))
+  }
+  keep = seq(burn_in,iterations,thin)
+  trace_all = t(apply(trace,1,transform,inv=T))
+  trace <- trace_all[keep, ]
+  llh = llh[keep]
+  eta = eta[keep]
+  delta = delta[keep]
+
+  accept_rate = mean(accept[burn_in:iterations])
+  val <- list(t.samp = trace[,1:length(pars)-1,drop=F],ssq.samp=trace[,length(pars)], ll.samp = llh,
+              eta = eta, delta = delta,
+              prop.cov = prop_sigma, par_names = par_names,
+              acpt.ratio = accept_rate, time=proc.time()[3]-ptm,n.samples=iterations,n.burn=burn_in,samp.all = trace_all)
+  class(val) <- c("mcmc","list")
+  return(val)
 }
+
 #' @title FlaGP MCMC with joint proposal
 #'
 #' @description Addaptive MCMC as defined in Haario et al. 2001 - "An adaptive Metropolis algorithm"
@@ -397,26 +522,7 @@ logit.jacobian = function(theta){
 log.jacobian = function(ssq){
   log(ssq)
 }
-# proposal = function(t.curr,p.t,sample.type,prop.type,prop.cov){
-#   if(prop.type == 'mv'){
-#     # multivariate proposal with covariances
-#     if(sample.type=='logit'){
-#       t.prop = mvtnorm::rmvnorm(1, log(t.curr/(1-t.curr)), prop.cov)
-#       t.prop = exp(t.prop)/(1+exp(t.prop))
-#     } else{
-#       t.prop = mvtnorm::rmvnorm(1, t.curr, (prop.cov))
-#     }
-#   } else{
-#     # diagonal proposal with variance only - sampling may be less efficient than if correlation between the parameters is used for proposal
-#     if(sample.type=='logit'){
-#       t.prop = rnorm(p.t,log(t.curr/(1-t.curr)), sqrt(diag(prop.cov)))
-#     } else{
-#       t.prop = rnorm(p.t,t.curr, sqrt(diag((prop.cov))))
-#     }
-#   }
-#   return(t.prop)
-# }
-# propose both theta and sigma^2
+
 proposal = function(t.curr,ssq.curr,p.t,prop.cov){
   # propose theta on logit scale and error variance on log scale
   par.prop = mvnfast::rmvn(1,c(log(t.curr/(1-t.curr)),log(ssq.curr)), prop.cov)
@@ -438,21 +544,6 @@ add_samples = function(flagp,mcmc,n.samples=100,
                        theta.prior='beta',theta.prior.params=c(2,2),
                        ssq.prior='hcauchy',ssq.prior.params=c(.5),
                        verbose=T){
-
-  # flagp,
-  # t.init=rep(.5,flagp$XT.data$p.t),
-  # ssq.init=.01,
-  # prop.cov=diag((.5/3)^2,flagp$XT.data$p.t+1),
-  # n.samples=10000,n.burn=1000,
-  # adapt.par = c(100,50,50,1000),
-  # end.eta=50,
-  # delta.method='newGP',start.delta=6,end.delta=50,
-  # theta.prior='beta',theta.prior.params=c(2,2),
-  # ssq.prior='hcauchy',ssq.prior.params=c(.5),
-  # prev.samples=NULL,
-  # recalc.llh=F,#sample.type='logit',prop.type='mv',
-  # sample=as.logical(ifelse(flagp$bias,F,T)),
-  # verbose=T)
 
   add.samples = mcmc(flagp,
                      t.init=mcmc$t.samp[nrow(mcmc$t.samp),],
@@ -587,4 +678,242 @@ update_tuning_mv <- function(k, accept, lambda, batch_samples,
       Sigma_tune      = Sigma_tune_out
     )
   )
+}
+
+Metro_Hastings_Stochastic_Logit_OneAtATime = function (
+    flagp,
+    li_func,
+    pars,
+    prop_sigma = NULL,
+    par_names = NULL,
+    iterations = 50000,
+    burn_in = 1000,
+    thin = 1,
+    adapt_par = c(100, 20, 0.5, 0.75),
+    recalc = TRUE,
+    sample = TRUE,
+    quiet = FALSE,
+    ...
+) {
+  ##
+  ## 1) Define transformations and Jacobian
+  ##
+  transform = function(pars, inv = FALSE){
+    p.t = length(pars) - 1
+    if(inv) {
+      # back-transform
+      pars[1:p.t] = invlogit(pars[1:p.t])
+      pars[p.t+1] = exp(pars[p.t+1])
+    } else {
+      # forward transform
+      pars[1:p.t] = logit(pars[1:p.t])
+      pars[p.t+1] = log(pars[p.t+1])
+    }
+    return(pars)
+  }
+
+  jacobian = function(pars, transformed = FALSE){
+    # Returns sum of log of absolute value of the derivative
+    # for each parameter dimension
+    p.t = length(pars) - 1
+    if(transformed) {
+      # 'pars' is currently on *transformed* scale
+      # so we invert it to original scale before computing
+      pars = transform(pars, inv = TRUE)
+    }
+    # Now 'pars' are on the original scale:
+    # partial derivatives:
+    # d/d(logit(p)) = 1/[p(1-p)],   so log(|d/d(logit(p))|) = -log([p(1-p)])
+    # d/d(log(sigma)) = 1/sigma,    so log(|d/d(log(sigma))|) = -log(sigma)
+    # => But we often incorporate these as + log(Jacobian) or - log(Jacobian)
+    # depending on how you structured li_func.  In your original code, you do:
+    #   sum(log(p_i*(1-p_i))) + log(sigma)
+    # so let's keep that approach.
+    jac = sum(log(pars[1:p.t] * (1 - pars[1:p.t]))) + log(pars[p.t+1])
+    return(jac)
+  }
+
+  ##
+  ## 2) Initial checks and setup
+  ##
+  ptm = proc.time()[3]
+  if(is.null(sample))
+    sample = as.logical(ifelse(flagp$bias, TRUE, FALSE))
+
+  # Evaluate log-likelihood at starting values
+  if (!is.finite(li_func(pars, sample = sample, ...))) {
+    stop("Seed parameter values <pars> are not in the defined parameter space.
+         Try new starting values for <pars>.")
+  }
+
+  if (is.null(par_names))
+    par_names <- letters[1:length(pars)]
+
+  # If user has provided a proposal sigma, check dims
+  if (!is.null(dim(prop_sigma))) {
+    if ((dim(prop_sigma)[1] != length(pars) || dim(prop_sigma)[2] != length(pars))) {
+      stop("prop_sigma not of dimension length(pars) x length(pars)")
+    }
+  }
+
+  ## 3) If no proposal covariance is given, do a quick optimization-based guess
+  if (is.null(prop_sigma)) {
+    if (length(pars) > 1) {
+      fit <- optim(pars, li_func, control = list(fnscale = -1),
+                   hessian = TRUE, opt = TRUE, sample=sample, ...)
+      fisher_info <- solve(-fit$hessian)
+      stdevs <- sqrt(diag(fisher_info))
+      prop_sigma <- diag(stdevs)
+    } else {
+      # Single-parameter guess
+      prop_sigma <- matrix(1 + pars/2, nrow = 1)
+    }
+  }
+  # Force positive-definiteness by adding small identity
+  I = diag(1e-8, length(pars))
+  prop_sigma <- prop_sigma + I
+
+  p.t = length(pars) - 1
+
+  # Evaluate 'pi_X' at the starting point, on original scale:
+  pi_X <- li_func(pars, full = TRUE, sample = sample, ...)
+  # Add Jacobian from the untransformed 'pars':
+  pi_X$ll = pi_X$ll + jacobian(pars, transformed = FALSE)
+
+  # 'k_X' is in the transformed space
+  k_X <- transform(pars)
+
+  # Storage
+  trace <- matrix(NA, nrow = iterations, ncol = length(pars))
+  llh   <- numeric(iterations)
+  accept = numeric(iterations)  # acceptance count per *iteration* (summing over params)
+
+  # Possibly store any states from pi_X
+  eta   <- vector("list", iterations)
+  delta <- vector("list", iterations)
+
+  # For printing progress
+  announce <- floor(seq(iterations/10, iterations, length.out = 10))
+
+  ##
+  ## 4) Main iteration loop
+  ##
+  for (iter in seq_len(iterations)) {
+
+    # For each parameter dimension, do a one-at-a-time update
+    n_accepted = 0  # track how many accepted in this iteration
+
+    for (j in seq_along(k_X)) {
+
+      # Propose new value for dimension j
+      k_Y = k_X
+      # sample from Normal(k_X[j], sqrt(prop_sigma[j,j]))
+      # you can use rnorm or anything else
+      k_Y[j] = rnorm(1, mean = k_X[j], sd = sqrt(prop_sigma[j,j]))
+
+      # Evaluate new log-likelihood
+      pi_Y <- li_func(transform(k_Y, inv = TRUE), full = TRUE, sample = sample, ...)
+      # Add Jacobian on transformed scale
+      pi_Y$ll = pi_Y$ll + jacobian(k_Y, transformed = TRUE)
+
+      # MH acceptance ratio (log scale)
+      a_X_Y = pi_Y$ll - pi_X$ll
+
+      if (is.nan(a_X_Y)) a_X_Y <- -Inf
+
+      # Accept/reject
+      if (log(runif(1)) <= a_X_Y) {
+        # Accept
+        k_X  = k_Y
+        pi_X = pi_Y
+        n_accepted = n_accepted + 1
+      } else {
+        # Reject
+        # If recalc = TRUE, we re-sample some latent variables in pi_X
+        if (recalc) {
+          pi_X$eta = resample_w(pi_X$eta$w,
+                                flagp$Y.data$obs$trans,
+                                flagp$basis$obs$B,
+                                flagp$prior$ssq.prior.params)
+          if (flagp$bias) {
+            pi_X$delta = resample_v(pi_X$delta,
+                                    flagp$basis$obs$D,
+                                    pi_X$eta$y.resid)
+          }
+          pi_X$ll = compute_ll(pi_X$theta, pi_X$ssq, pi_X$eta, pi_X$delta,
+                               sample, flagp,
+                               flagp$prior$theta.prior,
+                               flagp$prior$theta.prior.params,
+                               flagp$prior$ssq.prior,
+                               flagp$prior$ssq.prior.params)
+          # Add jacobian for the *current* k_X
+          pi_X$ll = pi_X$ll + jacobian(k_X, transformed = TRUE)
+        }
+      }
+    }  # end loop over parameters
+
+    # Store
+    trace[iter, ] = k_X
+    llh[iter]     = pi_X$ll
+    eta[[iter]]   = pi_X$eta
+    delta[[iter]] = pi_X$delta
+
+    accept[iter]  = n_accepted / length(k_X)
+
+    ##
+    ## Adaptation step
+    ##
+    if (iter > adapt_par[1] &&
+        (iter %% adapt_par[2]) == 0 &&
+        iter < (adapt_par[4] * iterations)) {
+
+      len <- floor(iter * adapt_par[3]):iter
+      x   <- trace[len, ]
+      N   <- length(len)
+
+      # Compute diagonal from var(x) on the transformed scale
+      # var(x) returns a full covariance; we take diag and rebuild
+      # p_var = diag(var(x) * (N-1)/N)  # unbiased estimate
+      # p_var = p_var + I   # ensure positivity
+      p_var = apply(x,2,var)
+      prop_sigma = diag(p_var)
+    }
+
+    # Progress printing
+    if(!quiet && iter %in% announce) {
+      cat(paste0(". iteration: ", iter,
+                 " (", round(iter/iterations * 100, 2), "%), ",
+                 " acceptance rate: ",
+                 round(mean(accept[1:iter]), 3), "\n"))
+    }
+  }
+
+  ##
+  ## 5) Post-processing
+  ##
+  keep       = seq(burn_in, iterations, by = thin)
+  trace_all  = t(apply(trace, 1, transform, inv = TRUE))
+  trace_keep = trace_all[keep, , drop = FALSE]
+  llh_keep   = llh[keep]
+  eta_keep   = eta[keep]
+  delta_keep = delta[keep]
+
+  accept_rate = mean(accept[burn_in:iterations])
+
+  val <- list(
+    t.samp     = trace_keep[, 1:(length(pars)-1), drop=FALSE],
+    ssq.samp   = trace_keep[, length(pars)],
+    ll.samp    = llh_keep,
+    eta        = eta_keep,
+    delta      = delta_keep,
+    prop.cov   = prop_sigma,
+    par_names  = par_names,
+    acpt.ratio = accept_rate,
+    time       = proc.time()[3] - ptm,
+    n.samples  = iterations,
+    n.burn     = burn_in,
+    samp.all   = trace_all
+  )
+  class(val) <- c("mcmc","list")
+  return(val)
 }

@@ -38,6 +38,8 @@ compute_ll = function(theta,ssq,eta,delta,sample,flagp,
     if(flagp$bias){
       if(delta$method%in%c('lagp','newGP')){
         v.scale.adjust = delta$v$df / (delta$v$df-2)
+        if(v.scale.adjust<=1) # small number of observations
+          v.scale.adjust = 1
       } else{
         v.scale.adjust = 1
       }

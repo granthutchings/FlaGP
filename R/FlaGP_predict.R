@@ -79,6 +79,7 @@ mv_delta_predict = function(X.pred.orig,delta,flagp,sample=F,n.samples=1, start=
     pred = lapply(1:n.pc, function(k) laGP::predGPsep(delta.GPs[[k]],X.pred.std,lite=T))
     for(i in 1:n.pc){
       v$mean = rbind(v$mean,pred[[i]]$mean)
+      v$var = rbind(v$var,pred[[i]]$s2)
       v$scale = rbind(v$scale,pred[[i]]$s2*(v$df-2)/v$df)
     }
   } else if(delta$method=='lagp'){
@@ -165,7 +166,7 @@ predict.flagp = function(flagp,model=NULL,X.pred.orig=NULL,n.samples=100,samp.id
   if(!is.null(model)){
     if(class(model)[1] == 'mcmc'){
       if(verbose)
-        cat('MCMC object with covariance given. Drawing predictive samples from posterior distribution.')
+        cat('MCMC object given. Drawing predictive samples from posterior distribution.')
       # pred = mcmc_predict(flagp,model,X.pred.orig,samp.ids,n.samples,return.samples,support,end.eta,start.delta,end.delta,
       #                     return.eta,return.delta,native,y.conf.int,resid.error,w.var,y.var)
       pred = mcmc_predict_joint(flagp, model, X.pred.orig, n.samples, samp.ids,
@@ -178,7 +179,7 @@ predict.flagp = function(flagp,model=NULL,X.pred.orig=NULL,n.samples=100,samp.id
         if(verbose)
           cat('MAP object without covariance given. Drawing samples from predictive distribution at MLE.')
         pred = map_predict(flagp,model,X.pred.orig,n.samples,return.samples,support,end.eta,start.delta,end.delta,
-                           y,native,y.conf.int,resid.error,w.var,y.var,alpha,verbose)
+                           y,native,y.conf.int,resid.error,w.var,y.var,alpha,return.eta,return.delta,verbose)
       } else{
         # we have the covariance matrix from the optimization, so take samples and do mcmc predict
         if(verbose)
@@ -207,7 +208,7 @@ predict.flagp = function(flagp,model=NULL,X.pred.orig=NULL,n.samples=100,samp.id
 
 map_predict = function(flagp,map,X.pred.orig,n.samples,return.samples,support,
                        end.eta,start.delta,end.delta,y,native,y.conf.int,
-                       resid.error,w.var,y.var,alpha,verbose)
+                       resid.error,w.var,y.var,alpha,return.eta,return.delta,verbose)
 {
   get_yvar = function(B,wvar,ysd,s2,native=T,bias=F,D=NULL,vvar=NULL){
     diag_Sigma_w = diag(B%*%tcrossprod(diag(wvar),B))
@@ -264,14 +265,20 @@ map_predict = function(flagp,map,X.pred.orig,n.samples,return.samples,support,
   }
 
   # n = 1 if no X model
-  n.pred = ifelse(!is.null(X.pred.orig),nrow(X.pred.orig),1)
+  # and make a dummy x
+  if(is.null(X.pred.orig)){
+    n.pred = 1
+    if(flagp$bias)
+      X.pred.orig = matrix(.5,ncol=1)
+  }
+
   # transform_theta
   theta = map$theta.hat * flagp$XT.data$sim$T$range + flagp$XT.data$sim$T$min
 
   # emulator predictions
-  start.time = proc.time()
+  start.time = proc.time()[3]
   w = predict_w(flagp,X.pred.orig,theta,end=end.eta,w.var=w.var,n.pc=n.pc)
-  returns$time = proc.time() - start.time
+  returns$pred.time = proc.time()[3] - start.time
 
   if(!flagp$bias & y){
     # mean
@@ -286,7 +293,7 @@ map_predict = function(flagp,map,X.pred.orig,n.samples,return.samples,support,
       for(j in 1:n.pred){
         returns$y.var[,j] = get_yvar(B,w$var[,j],ysd,s2)
         if(n.samples>1){
-          returns$y.samp[,,j] = get_ysamp(B,w$mean[,j,drop=F],w$scale[,j]*w$df/(w$df-2),
+          returns$y.samp[,,j] = get_ysamp(B,w$mean[,j,drop=F],w$var[,j],
                                           s2,ysd,ym,n.samples)
         }
       }
@@ -297,10 +304,10 @@ map_predict = function(flagp,map,X.pred.orig,n.samples,return.samples,support,
     v = mv_delta_predict(X.pred.orig,map$delta,flagp,F,start=start.delta,end=end.delta)
     returns$time = returns$time + proc.time() - start.time
 
-    v$var = v$scale[,j]*v$df/(v$df-2)
-
     # mean
-    returns$y.mean = (B%*%w$mean + D%*%v$mean) * ysd + ym
+    eta = B%*%w$mean * ysd + ym
+    delta = D%*%v$mean * ysd
+    returns$y.mean = eta + delta
 
     # variance, confidence interval, samples
     if(y.var | y.conf.int){
@@ -309,10 +316,10 @@ map_predict = function(flagp,map,X.pred.orig,n.samples,return.samples,support,
         returns$y.samp = array(0,dim=c(n.samples,n.y,n.pred))
       }
       for(j in 1:n.pred){
-        returns$y.var[,j] = get_yvar(B,w$var[,j],ysd,s2,bias = T,D = D,vvar = v$var)
+        returns$y.var[,j] = get_yvar(B,w$var[,j],ysd,s2,bias = T,D = D,vvar = v$var[,j])
         if(n.samples>1){
-          returns$y.samp[,,j] = get_ysamp(B,w$mean[,j,drop=F],w$scale[,j]*w$df/(w$df-2),
-                                          s2,ysd,ym,n.samples,bias=T,D=D,vvar=v$var)
+          returns$y.samp[,,j] = get_ysamp(B,w$mean[,j,drop=F],w$var[,j],
+                                          s2,ysd,ym,n.samples,bias=T,D=D,vvar=v$var[,j])
         }
       }
     }
@@ -323,6 +330,10 @@ map_predict = function(flagp,map,X.pred.orig,n.samples,return.samples,support,
     returns$y.conf.int[1,,] = qnorm(alpha/2,returns$y.mean,sqrt(returns$y.var))
     returns$y.conf.int[2,,] = qnorm(1-(alpha/2),returns$y.mean,sqrt(returns$y.var))
   }
+  if(return.eta)
+    returns$eta = eta
+  if(return.delta)
+    returns$delta = delta
   return(returns)
 }
 

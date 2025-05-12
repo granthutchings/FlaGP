@@ -195,37 +195,90 @@ plot.flagp = function(flagp,basis=T,legend=T,sim.subsample=1:flagp$Y.data$m,xlab
 #' @examples
 #' # See examples folder for R markdown notebooks.
 #'
-plot.mcmc = function(x, labels=NULL, nrow=2, ncol=2, ...){
+plot.mcmc = function(x, labels=NULL, lims = NULL, nrow=2, ncol=2, n.burn = 0,...){
   if(class(x)[1]!='mcmc')
     stop('x must be an object of class mcmc')
   p.t = ncol(x$t.samp)
-  if(is.null(labels)){labels = paste0('t ',1:p.t)}
-  if(p.t>1){
-    panel.hist <- function(x,...) {
-      usr <- par("usr")
-      on.exit(par(usr))
-      par(usr = c(usr[1:2], 0, 1.5))
-      his <- hist(x, plot = FALSE)
-      breaks <- his$breaks
-      nB <- length(breaks)
-      y <- his$counts
-      y <- y/max(y)
-      rect(breaks[-nB], 0, breaks[-1],y, ...)
-      # lines(density(x), col = 2, lwd = 2) # Uncomment to add density lines
-    }
-    pairs(x$t.samp,diag.panel = panel.hist, labels = labels, ...)
-    par(mfrow=c(nrow,ncol))
-    for(i in 1:p.t){
-      plotlims = c(max(0,min(x$t.samp[,i])-.05),min(1,max(x$t.samp[,i])+.05))
-      plot(x$t.samp[,i],type='l',ylab=labels[i],xlab='MCMC iteration (post-burn)',ylim=plotlims)
-    }
-    plot(x$ssq.samp,type='l',ylab='error variance',xlab='MCMC iteration (post-burn)')
+  n.samp = nrow(x$t.samp)
+  x$t.samp = x$t.samp[(n.burn+1):n.samp,]
+  x$ssq.samp = x$ssq.samp[(n.burn+1):n.samp]
+  x$ll.samp = x$ll.samp[(n.burn+1):n.samp]
+  n.samp = nrow(x$t.samp)
+
+  if(n.samp>1000){
+    sub = as.integer(seq(1,n.samp,length.out=1000))
   } else{
-    par(mfrow = c(2,1))
-    plot(x$ssq.samp,type='l',ylab='error variance',xlab='MCMC iteration (post-burn)')
-    plotlims = c(max(0,min(x$t.samp[,1])-.05),min(1,max(x$t.samp[,1])+.05))
-    plot(x$t.samp[,1],type='l',ylab=labels[1],xlab='MCMC iteration (post-burn)',ylim=plotlims)
+    sub = 1:n.samp
   }
+  if(is.null(labels)){labels = paste0('t ',1:p.t)}
+  if(is.null(lims))
+    lims = c(0,1)
+
+  # pairs plot
+  if(p.t>1){
+    par(mfrow=c(p.t,p.t),mar=c(.25,.25,.25,.25))
+    for(i in 1:p.t){
+      for(j in 1:p.t){
+        if(j>i){
+          plot.new()
+        } else if(j<i){
+          plot(x$t.samp[sub,j],x$t.samp[sub,i],xlim=lims,ylim=lims,axes = F,
+               pch=21,col='white',bg='blue3',lwd=.5)
+          box()
+        } else{
+          #j==i
+          D = density(x$t.samp[,i],from=lims[1],to=lims[2],bw=.05)
+          plot(D,ylim=c(0,1.5*max(D$y)),main="",ylab="",xlab="",lwd=2,axes=F,col='blue3')
+          box()
+          curve(dunif(x,0,1),0,1,lty=2,add=T)
+          text(.3,1.2*max(D$y),labels[i],cex=2)
+        }
+      }
+    }
+  } else{
+    par(mfrow(1,2),mar=c(4,4,4,4))
+    hist(x$t.samp[,1],xlim=lims)
+    plot(x$t.samp[,1],type='l',ylab=labels[1],xlab='MCMC iteration (post-burn)',ylim=lims)
+  }
+
+  # line plot
+  par(mfrow=c(3,1),mar=c(4,4,2,2))
+  theta_cols = RColorBrewer::brewer.pal(p.t,'Set3')
+  plot(x$t.samp[,1],type='l',ylab='theta',xlab='MCMC iteration (post-burn)',ylim=lims)
+  if(p.t>1){
+    for(i in 2:p.t){
+      lines(x$t.samp[,i],type='l',ylim=lims,col=theta_cols[i-1])
+    }
+  }
+  plot(x$ssq.samp,type='l',ylab='error variance',xlab='MCMC iteration (post-burn)')
+  plot(x$ll.samp,type='l',ylab='log likelihood',xlab='MCMC iteration (post-burn)')
+
+  # if(p.t>1){
+  #   panel.hist <- function(x,...) {
+  #     usr <- par("usr")
+  #     on.exit(par(usr))
+  #     par(usr = c(usr[1:2], 0, 1.5))
+  #     his <- hist(x, plot = FALSE)
+  #     breaks <- his$breaks
+  #     nB <- length(breaks)
+  #     y <- his$counts
+  #     y <- y/max(y)
+  #     rect(breaks[-nB], 0, breaks[-1],y, ...)
+  #     # lines(density(x), col = 2, lwd = 2) # Uncomment to add density lines
+  #   }
+  #   pairs(x$t.samp,diag.panel = panel.hist, labels = labels, ...)
+  #   par(mfrow=c(nrow,ncol))
+  #   for(i in 1:p.t){
+  #     plotlims = c(max(0,min(x$t.samp[,i])-.05),min(1,max(x$t.samp[,i])+.05))
+  #     plot(x$t.samp[,i],type='l',ylab=labels[i],xlab='MCMC iteration (post-burn)',ylim=plotlims)
+  #   }
+  #   plot(x$ssq.samp,type='l',ylab='error variance',xlab='MCMC iteration (post-burn)')
+  # } else{
+  #   par(mfrow = c(2,1))
+  #   plot(x$ssq.samp,type='l',ylab='error variance',xlab='MCMC iteration (post-burn)')
+  #   plotlims = c(max(0,min(x$t.samp[,1])-.05),min(1,max(x$t.samp[,1])+.05))
+  #   plot(x$t.samp[,1],type='l',ylab=labels[1],xlab='MCMC iteration (post-burn)',ylim=plotlims)
+  # }
 }
 
 #' @title Plot MCMC posteriors

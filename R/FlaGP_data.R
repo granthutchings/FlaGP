@@ -726,6 +726,24 @@ flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                   
                  small=F,seed=NULL,verbose=T,
                  rsvd = F, nug.est = T){                                                       # additional flags
 
+
+  if(bias & is.null(D)){
+    warnings('No D basis given, proceding with discrepancy free model.')
+    bias = F
+  }
+  if(!is.null(D)){
+    bias = T
+  }
+
+  # we need a dummy x if
+  dummy_x = !is.null(Y.obs) & is.null(X.obs)
+
+  if(dummy_x){
+    X.obs = matrix(rep(.5,ncol(Y.obs)),ncol=1)
+    if(is.null(X.sim))
+      X.sim = matrix(rep(.5,ncol(Y.sim)),ncol=1)
+  }
+
   # sim
   if(!is.null(X.sim)){
     if(!is.matrix(X.sim)) # X.sim is a vector indicating scalar response, make it a matrix with 1 column

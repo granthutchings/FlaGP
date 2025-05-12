@@ -5,7 +5,6 @@ fit_model = function(theta,ssq,flagp,
                      negll=F,
                      theta.prior='beta',theta.prior.params=c(2,2),
                      ssq.prior='hcauchy',ssq.prior.params=c(.5),map=F){
-
   # Predict from emulator at [X.obs,theta]
   eta = FlaGP:::fit_eta(theta,flagp,sample,end.eta,ssq.prior.params,map=map)
 
@@ -48,8 +47,11 @@ fit_model_map = function(param,flagp,
   if(loglogit){
     theta = LaplacesDemon::invlogit(param[1:flagp$XT.data$p.t]) # theta passed on logit scale for optimization
     ssq = exp(param[flagp$XT.data$p.t+1]) # passed in on log scale
+  } else{
+    theta = param[1:flagp$XT.data$p.t]
+    ssq = param[flagp$XT.data$p.t+1]
   }
-  
+
   if(!all(theta < 1 & theta > 0) | ssq<=0){
     return(Inf) # minimization problem
   }
@@ -213,7 +215,11 @@ fit_delta = function(y.resid,D,XT.data,sample,delta.method,start,end,ssq.prior.p
   if(sample){
     # sampling via cholesky where chol = sqrt(var)
     if(delta.method %in% c('lagp','newGP')){
-      v$sample = (rt(prod(dim(v$mean)),v$df) * sqrt(v$scale)) + v$mean
+      if(all(v$scale>0)){
+        v$sample = (rt(prod(dim(v$mean)),v$df) * sqrt(v$scale)) + v$mean
+      } else{
+        v$sample = (rnorm(prod(dim(v$mean))) * sqrt(v$var)) + v$mean
+      }
     } else{
       v$sample = (rnorm(prod(dim(v$mean))) * sqrt(v$var)) + v$mean
     }
@@ -241,7 +247,11 @@ fit_delta = function(y.resid,D,XT.data,sample,delta.method,start,end,ssq.prior.p
 resample_v = function(delta,D,eta.y.resid){##ssq.prior.params,delta.method){
   # resample v
   if(delta$method %in% c('lagp','newGP')){
-    delta$v$sample = (rt(prod(dim(delta$v$mean)),delta$v$df) * sqrt(delta$v$scale)) + delta$v$mean
+    if(all(delta$v$scale>0)){
+      delta$v$sample = (rt(prod(dim(delta$v$mean)),delta$v$df) * sqrt(delta$v$scale)) + delta$v$mean
+    } else{
+      delta$v$sample = (rnorm(prod(dim(delta$v$mean))) * sqrt(delta$v$var)) + delta$v$mean
+    }
   } else{
     delta$v$sample = (rnorm(prod(dim(delta$v$mean))) * sqrt(delta$v$var)) + delta$v$mean
   }
