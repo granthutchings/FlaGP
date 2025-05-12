@@ -16,7 +16,7 @@ map = function(flagp,n.restarts=1,init=NULL,seed=1,
                end.eta=50,delta.method='newGP',start.delta=6,end.delta=50,
                theta.prior='beta',theta.prior.params=c(2,2),
                ssq.prior='hcauchy',ssq.prior.params=c(.1),
-               method='snomadr',make.cluster=F){
+               method='snomadr',make.cluster=F,return_opt=F){
 
   p.t = flagp$XT.data$p.t
   if(!is.null(init)){
@@ -61,7 +61,8 @@ map = function(flagp,n.restarts=1,init=NULL,seed=1,
                                                                   theta.prior=theta.prior,
                                                                   theta.prior.params=theta.prior.params,
                                                                   ssq.prior=ssq.prior,
-                                                                  ssq.prior.params=ssq.prior.params)
+                                                                  ssq.prior.params=ssq.prior.params,
+                                                                  loglogit=F)
     } else{
       out = crs::snomadr(fit_model_map, n = p.t+1, bbin = rep(0, p.t+1), bbout = 0,
                          x0 = init,
@@ -78,7 +79,8 @@ map = function(flagp,n.restarts=1,init=NULL,seed=1,
                          theta.prior=theta.prior,
                          theta.prior.params=theta.prior.params,
                          ssq.prior=ssq.prior,
-                         ssq.prior.params=ssq.prior.params)
+                         ssq.prior.params=ssq.prior.params,
+                         loglogit=F)
     }
 
     if(n.restarts>1){
@@ -98,7 +100,7 @@ map = function(flagp,n.restarts=1,init=NULL,seed=1,
   } else{
     # regular optim
 
-    # put ssq on log scale 
+    # put ssq on log scale
     init[,p.t+1] = log(init[,p.t+1])
     # put theta on logit scale
     init[,1:p.t] = LaplacesDemon::logit(init[,1:p.t])
@@ -153,7 +155,7 @@ map = function(flagp,n.restarts=1,init=NULL,seed=1,
 
       theta.hat = solutions[which.min(objectives),1:p.t]
       ssq.hat = solutions[which.min(objectives),p.t+1]
-      
+
       H = makePositiveDefinite(out[[which.min(objectives)]]$hessian)
       Cov = chol2inv(chol(H))
     } else{
@@ -176,7 +178,8 @@ map = function(flagp,n.restarts=1,init=NULL,seed=1,
   if(method=='optim')
     return$Cov = Cov
   return$delta$method = delta.method
-  return$opt = out
+  if(return_opt)
+    return$opt = out
   return$theta.hat = theta.hat; return$theta = NULL
   return$ssq.hat = ssq.hat; return$ssq = NULL
   return$solutions = solutions
