@@ -14,7 +14,11 @@ predict_w = function(flagp,X.pred.orig=NULL,theta=NULL,end=50,sample=F,n.samples
     X = transform_xt(X.sim = flagp$XT.data$sim$X$orig,
                      T.sim = flagp$XT.data$sim$T$orig,
                      X.obs = X.pred.orig,
-                     T.obs = matrix(rep(theta,n.x.pred),nrow=n.x.pred,byrow=T))
+                     T.obs = matrix(rep(theta,n.x.pred),nrow=n.x.pred,byrow=T),
+                     X.min = flagp$XT.data$sim$X$min,
+                     X.range = flagp$XT.data$sim$X$range,
+                     T.min = flagp$XT.data$sim$T$min,
+                     T.range = flagp$XT.data$sim$T$range)
 
     X = get_SC_inputs(flagp$lengthscales,X,n.pc)
 
@@ -26,7 +30,9 @@ predict_w = function(flagp,X.pred.orig=NULL,theta=NULL,end=50,sample=F,n.samples
                      end=end,g=flagp$lengthscales$g,predvar=w.var)
   } else{
     X = transform_xt(X.sim = flagp$XT.data$sim$X$orig,
-                     X.obs = X.pred.orig)
+                     X.obs = X.pred.orig,
+                     X.min = flagp$XT.data$sim$X$min,
+                     X.range = flagp$XT.data$sim$X$range)
 
     X = get_SC_inputs(flagp$lengthscales,X,n.pc)
     XX = lapply(1:n.pc,function(i) X$X.obs[[i]])
@@ -108,7 +114,11 @@ mv_delta_predict = function(X.pred.orig,delta,flagp,sample=F,n.samples=1, start=
       v$var = rbind(v$var,pred[[i]]$sd^2)
     }
   } else if(delta$method=='mlegp'){
-
+    pred = lapply(1:n.pc, function(k) mlegp::predict.gp(delta$model[[k]],X.pred.std,se.fit=T))
+    for(i in 1:n.pc){
+      v$mean = rbind(v$mean,t(pred[[i]]$fit))
+      v$var = rbind(v$var,t(pred[[i]]$se.fit^2))
+    }
   }
 
   if(sample){

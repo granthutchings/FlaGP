@@ -422,9 +422,9 @@ aGPsep_SC_mv = function(X, Z, XX, g, start=6, end=50, bias=F, sample=F, predvar=
     sample = mean
   }
   if(predvar){
-    return(list(mean=mean,scale=scale,var=scale*end/(end-2),krigvar=krigvar,sample=sample,df=end))
+    return(list(mean=mean,scale=scale,var=scale*end/(end-2),krigvar=krigvar,sample=sample,df=end,nn.indx=nn.indx))
   } else{
-    return(list(mean=mean,sample=sample,df=end))
+    return(list(mean=mean,sample=sample,df=end,nn.indx=nn.indx))
   }
 }
 

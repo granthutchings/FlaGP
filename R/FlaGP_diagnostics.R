@@ -200,7 +200,7 @@ plot.mcmc = function(x, labels=NULL, lims = NULL, nrow=2, ncol=2, n.burn = 0,...
     stop('x must be an object of class mcmc')
   p.t = ncol(x$t.samp)
   n.samp = nrow(x$t.samp)
-  x$t.samp = x$t.samp[(n.burn+1):n.samp,]
+  x$t.samp = x$t.samp[(n.burn+1):n.samp,,drop=F]
   x$ssq.samp = x$ssq.samp[(n.burn+1):n.samp]
   x$ll.samp = x$ll.samp[(n.burn+1):n.samp]
   n.samp = nrow(x$t.samp)
@@ -236,7 +236,7 @@ plot.mcmc = function(x, labels=NULL, lims = NULL, nrow=2, ncol=2, n.burn = 0,...
       }
     }
   } else{
-    par(mfrow(1,2),mar=c(4,4,4,4))
+    par(mfrow=c(1,2),mar=c(4,4,4,4))
     hist(x$t.samp[,1],xlim=lims)
     plot(x$t.samp[,1],type='l',ylab=labels[1],xlab='MCMC iteration (post-burn)',ylim=lims)
   }
