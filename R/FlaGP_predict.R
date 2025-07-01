@@ -731,10 +731,12 @@ em_only_predict = function(flagp, X.pred.orig, n.samples, support, end.eta, y, n
   if(y){
     returns$y.mean = flagp$basis$sim$B[,1:n.pc,drop=F]%*%w$mean * sd + mean
     if(y.var){
+      ptm = proc.time()[3]
       returns$y.var = array(0,dim=dim(returns$y.mean))
       for(j in 1:n.pred){
         returns$y.var[,j] = diag(flagp$Y.data$sim$sd^2*flagp$basis$sim$B[,1:n.pc,drop=F]%*%tcrossprod(diag(w$var[1:n.pc,j],n.pc),flagp$basis$sim$B[,1:n.pc,drop=F]))
       }
+      returns$time_yvar = proc.time()[3] - ptm
     }
     # if y.samp
     if(y.samp){
