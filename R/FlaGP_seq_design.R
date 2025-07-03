@@ -1,5 +1,5 @@
 # selects the X over the entire input space which has the largest prediction variance
-seq_design_max_var_y = function(model,Xcand01,n.pc=model$basis$sim$n.pc,end=50){
+seq_design_max_var_y = function(model,Xcand01,n.pc=model$basis$sim$n.pc,end=50,parallel=T){
 
   # TO DO
   # If the set of candidate points is not changing, we can skip recomputing the candidate point
@@ -7,16 +7,17 @@ seq_design_max_var_y = function(model,Xcand01,n.pc=model$basis$sim$n.pc,end=50){
   # added point did not effect the neighborhood which can speed up the process.
 
   # predict from the model at all candidate locations
-  pred = predict(model,X.pred.orig = Xcand01, verbose = F, y.var=T, X01=T,n.pc=min(n.pc,model$basis$sim$n.pc),end.eta = end)
+  pred = predict(model,X.pred.orig = Xcand01, verbose = F, y.var=T, X01=T,
+                 n.pc=min(n.pc,model$basis$sim$n.pc),end.eta = end, parallel=parallel)
   predvar = colMeans(pred$y.var)
   # return the X which has the largest prediction variance
   id = which.max(predvar)
   X = Xcand01[id,,drop=F]
   # IDEA: make an acquisition function that has a space filling property so that we don't just
   # pick points near the boundary
-  X_orig = t((t(X) * model$XT.data$sim$X$range) + model$XT.data$sim$X$min)
-  return(list(X_new=X,X_new_orig=X_orig,predvar=predvar,
-              max_var = predvar[which.max(predvar)], cand_id = id))
+  # X_orig = t((t(X) * model$XT.data$sim$X$range) + model$XT.data$sim$X$min)
+  return(list(X_new=X,predvar=predvar,
+              max_var = predvar[id], cand_id = id))
 }
 # selects random X over the entire input space from a candidate set
 seq_design_rand = function(model,Xcand01){
@@ -88,7 +89,7 @@ seq_design = function(model,n_cand=100,n_int=100,
     n_cand = nrow(Xcand01)
   }
   if(method=='maxvar' | method == 'MaxVar'){
-    return(seq_design_max_var_y(model,Xcand01,n.pc=n.pc,end=end))
+    return(seq_design_max_var_y(model,Xcand01,n.pc=n.pc,end=end,parallel=parallel))
   } else if(method=='rand'){
     return(seq_design_rand(model,Xcand01))
   } else if(method=='maximin'){
@@ -139,7 +140,7 @@ seq_design = function(model,n_cand=100,n_int=100,
     # IMSE depends on y, so we need to add the new y (which we don't know), so lets predict it
     # unfortunately this prediction may be poor, not sure if there's any way around this. So, adding a point based on
     # a predicted y, then replacing that predicted y with the true y is likely to lead to instability in IMSE.
-    pred_cand = predict(model,X.pred.orig = Xcand01, verbose = F,end.eta=end, y.var=F,n.pc=n.pc,X01=T)
+    pred_cand = predict(model,X.pred.orig = Xcand01, verbose = F,end.eta=end, y.var=F,n.pc=n.pc,X01=T, parallel = parallel)
 
     if(verbose){
       cat('searching candidate space ... \n')
