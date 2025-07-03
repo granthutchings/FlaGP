@@ -136,6 +136,11 @@ seq_design = function(model,n_cand=100,n_int=100,
     # for each candidate X, compute the reduction in integrated variance when adding the candidate X to the training set
     imse_new = numeric(n_cand)
 
+    # IMSE depends on y, so we need to add the new y (which we don't know), so lets predict it
+    # unfortunately this prediction may be poor, not sure if there's any way around this. So, adding a point based on
+    # a predicted y, then replacing that predicted y with the true y is likely to lead to instability in IMSE.
+    pred_cand = predict(model,X.pred.orig = Xcand01, verbose = F,end.eta=end, y.var=F,n.pc=n.pc,X01=T)
+
     if(verbose){
       cat('searching candidate space ... \n')
       pb = txtProgressBar(min = 1, max = n_cand/2, initial = 1)
@@ -148,13 +153,9 @@ seq_design = function(model,n_cand=100,n_int=100,
       # make copy of the model object that can be changed
       model_tmp = model
 
-      # IMSE depends on y, so we need to add the new y (which we don't know), so lets predict it
-      # unfortunately this prediction may be poor, not sure if there's any way around this. So, adding a point based on
-      # a predicted y, then replacing that predicted y with the true y is likely to lead to instability in IMSE.
-      pred_cand = predict(model_tmp,X.pred.orig = Xcand01[i,,drop=F], verbose = F,end.eta=end, y.var=F,n.pc=n.pc,X01=T)
 
       # add candidate point and predicted y to model
-      model_tmp = FlaGP::flagp_update(model_tmp,Xcand[i,,drop=F],NULL,pred_cand$y.mean,refit=F)
+      model_tmp = FlaGP::flagp_update(model_tmp,Xcand[i,,drop=F],NULL,pred_cand$y.mean[,i],refit=F)
 
       # determine which integration points contain the candidate point in their NN set over any of the PC's
       # we need to recompute all the prediction variances for these effected points
