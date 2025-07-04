@@ -60,8 +60,23 @@ predict_w = function(flagp,X.pred.orig=NULL,theta=NULL,end=50,sample=F,n.samples
                      g=flagp$lengthscales$g[1:n.pc],predvar=w.var,parallel=parallel)
   }
   if(sample){
-    w$sample = t(sapply(1:n.samples, function (i) rt(prod(dim(w$mean)),w$df) * sqrt(w$scale) + w$mean))
-    dim(w$sample) = c(n.samples,dim(w$mean))
+    # slow
+    # w$sample = t(sapply(1:n.samples, function (i) rt(prod(dim(w$mean)),w$df) * sqrt(w$scale) + w$mean))
+    # dim(w$sample) = c(n.samples,dim(w$mean))
+
+    # draw all the t‐variates at once:
+    dims = dim(w$mean)
+    n      <- prod(dims)
+    x <- rt(n * n.samples, w$df)
+
+    # reshape into a matrix: each row = one “sample” flattened
+    m <- matrix(x, nrow = n.samples, ncol = n, byrow = TRUE)
+
+    # scale & shift, then reshape back into an array of shape c(n.samples, dims)
+    w$sample <- array(
+      m * sqrt(w$scale) + rep(as.vector(w$mean), each = n.samples),
+      dim = c(n.samples, dims)
+    )
   } else{
     w$sample=w$mean
   }
@@ -163,7 +178,7 @@ mv_delta_predict = function(X.pred.orig,delta,flagp,sample=F,n.samples=1, start=
 #' @examples
 #' # See examples folder for R markdown notebooks.
 #'
-predict.flagp = function(flagp,model=NULL,X.pred.orig=NULL,n.samples=100,samp.ids=NULL,return.samples=F,support='obs',
+predict.flagp = function(flagp,model=NULL,X.pred.orig=NULL,n.samples=0,samp.ids=NULL,return.samples=F,support='obs',
                          end.eta=50,lagp.delta=F,start.delta=6,end.delta=50,return.eta=F,return.delta=F,
                          y=T, native=T, y.conf.int= T, joint = F,
                          resid.error = F, w.var = T, y.var = T, y.samp = T, verbose=T, alpha=.05, X01=F,
