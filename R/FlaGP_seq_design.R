@@ -28,10 +28,16 @@ seq_design_rand = function(model,Xcand01){
   return(list(X_new=X,X_new_orig=X_orig,cand_id = id))
 }
 # selects X over the entire input space from a candidate set to respect maximin with the previous set of points
-seq_design_maximin = function(model,Xcand01){
+seq_design_maximin = function(model,Xcand01,scaled=F){
 
-  # compute distances for candidate points to each model point
-  D = plgp::distance(Xcand01,model$XT.data$sim$X$trans)
+  if(scaled){
+    # do maximin w.r.t. 1st PC lengthscale estimates - you'd think this would be better
+    XcandSC = FlaGP:::sc_inputs(Xcand01,model$lengthscales$XT[[1]])
+    D = plgp::distance(XcandSC,model$SC.inputs$XT.sim[[1]])
+  } else{
+    # compute distances for candidate points to each model point
+    D = plgp::distance(Xcand01,model$XT.data$sim$X$trans)
+  }
   # find distance to closest model X for each cand X
   mins = apply(D,1,min)
   # pick the cand X with the maximum closest distance
@@ -92,8 +98,8 @@ seq_design = function(model,n_cand=100,n_int=100,
     return(seq_design_max_var_y(model,Xcand01,n.pc=n.pc,end=end,parallel=parallel))
   } else if(method=='rand'){
     return(seq_design_rand(model,Xcand01))
-  } else if(method=='maximin'){
-    return(seq_design_maximin(model,Xcand01))
+  } else if(method %in% c('maximin','maximin-scaled')){
+    return(seq_design_maximin(model,Xcand01,scaled = ifelse(method=='maximin-scaled',T,F)))
   } else{
     if(!XintGiven){
       Xint = lhs::maximinLHS(n_int,model$num$p.x + model$num$p.t)

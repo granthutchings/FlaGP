@@ -904,7 +904,12 @@ flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                   
 #' @examples
 #' # See examples folder for R markdown notebooks.
 #'
-flagp_update = function(model,Xnew_orig,Tnew_orig=NULL,Ynew_orig,refit=F,ls.subsample=NULL,ls.m=NULL,ls.K=NULL,seed=NULL,n.pc=NULL,parallel = T,make.cluster=T){
+flagp_update = function(model,Xnew_orig,Tnew_orig=NULL,Ynew_orig,
+                        refit=F,
+                        ls.subsample=NULL,ls.m=NULL,ls.K=NULL,
+                        seed=NULL,n.pc=NULL,
+                        parallel = T,make.cluster=T,
+                        verbose=T){
   if(refit){
     if(is.null(ls.subsample))
       ls.subsample = model$flags$ls.subsample
@@ -923,7 +928,8 @@ flagp_update = function(model,Xnew_orig,Tnew_orig=NULL,Ynew_orig,refit=F,ls.subs
                   Y.obs = model$Y.data$obs$orig,y.ind.obs = model$Y.data$obs$ind, X.min = model$XT.data$sim$X$min, X.range = model$XT.data$sim$X$range,
                   center = model$flags$center,scale = model$flags$scale,scaletype = model$flags$scaletype,n.pc = n.pc,pct.var = model$flags$pct.var,
                   nug.est = model$flags$nug.est,ls.subsample=ls.subsample,ls.m = ls.m,ls.K = ls.K,
-                  ls.parallel = parallel, make.cluster = make.cluster,ls.subsample.size = model$flags$ls.subsample.size,ls.nugget=model$flags$ls.nugget,verbose = F,transform_x=model$XT.data$transformed)
+                  ls.parallel = parallel, make.cluster = make.cluster,ls.subsample.size = model$flags$ls.subsample.size,ls.nugget=model$flags$ls.nugget,
+                  verbose = verbose,transform_x=model$XT.data$transformed)
   } else{
     # don't do any rescaling or the sequential design results will be completely unstable
     model$XT.data$sim$X$orig = rbind(Xnew_orig,model$XT.data$sim$X$orig)
