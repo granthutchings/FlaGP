@@ -31,7 +31,7 @@ get_basis = function(Y, n.pc = NULL, pct.var = .95, full.basis=F, B=NULL, V.t = 
   return.list = list()
 
   # Compute SVD
-  nExp = ncol(Y) # number of experiments or simulations
+  M = ncol(Y) # number of experiments or simulations
   if(is.null(B)){
     ptm = proc.time()[3]
     if(!rsvd){
@@ -44,8 +44,8 @@ get_basis = function(Y, n.pc = NULL, pct.var = .95, full.basis=F, B=NULL, V.t = 
       }
     }
     return.list$svd.time = proc.time()[3] - ptm
-    return.list$B = svdY$u %*% diag(svdY$d) / sqrt(nExp)
-    return.list$V.t = t(svdY$v) * sqrt(nExp)
+    return.list$B = svdY$u %*% diag(svdY$d) / sqrt(M)
+    return.list$V.t = t(svdY$v) * sqrt(M)
 
     # use percent variance if n.pc is not supplied
     percent.variance = zapsmall((svdY$d^2) / sum(svdY$d^2))
@@ -59,22 +59,27 @@ get_basis = function(Y, n.pc = NULL, pct.var = .95, full.basis=F, B=NULL, V.t = 
       return.list$pct.var = percent.variance
       return.list$B = as.matrix(return.list$B)
       return.list$V.t = as.matrix(return.list$V.t)
+      return.list$singular.values = svdY$d
     } else{
       return.list$pct.var = percent.variance[1:return.list$n.pc]
       return.list$B = as.matrix(return.list$B[,1:return.list$n.pc,drop=F])
       return.list$V.t = as.matrix(return.list$V.t[1:return.list$n.pc,,drop=F])
+      return.list$singular.values = svdY$d[1:return.list$n.pc]
     }
   } else{
     # manual basis matrix was passed
     return.list$B = B
     return.list$n.pc = ncol(B)
     return.list$V.t = V.t
-    if(is.null(V.t))
+    if(is.null(V.t)){
       if(all(dim(B)==c(1,1))){ # scalar response
         return.list$V.t = t(Y)
       } else{
         return.list$V.t = tcrossprod(solve(crossprod(B)),B)%*%Y
       }
+    }
+    # get singular values
+    return.list$singular.values = apply(B * sqrt(M), 2, norm, '2')
   }
 
   if(bias & is.null(D)){

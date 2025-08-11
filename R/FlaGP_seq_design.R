@@ -28,15 +28,26 @@ seq_design_rand = function(model,Xcand01){
   return(list(X_new=X,X_new_orig=X_orig,cand_id = id))
 }
 # selects X over the entire input space from a candidate set to respect maximin with the previous set of points
-seq_design_maximin = function(model,Xcand01,scaled=F){
+seq_design_maximin = function(model,Xcand01,scaled=F,n.pc=model$basis$sim$n.pc){
 
   if(scaled){
-    # do maximin w.r.t. 1st PC lengthscale estimates - you'd think this would be better
-    XcandSC = FlaGP:::sc_inputs(Xcand01,model$lengthscales$XT[[1]])
-    D = plgp::distance(XcandSC,model$SC.inputs$XT.sim[[1]])
+    if(n.pc>1){
+      # do maximin w.r.t. lengthscale estimates, using a weighted distance based on eigen value
+      XcandSCj = lapply(1:n.pc, function(j) FlaGP:::sc_inputs(Xcand01,model$lengthscales$XT[[j]]))
+      Dj = lapply(1:n.pc, function(j) sqrt(plgp::distance(XcandSCj[[j]],model$SC.inputs$XT.sim[[j]])))
+      w = model$basis$sim$singular.values/sum(model$basis$sim$singular.values)
+      D = matrix(0,nrow=nrow(Dj[[1]]),ncol=ncol(Dj[[1]]))
+      for(j in 1:n.pc){
+        D = D + w[j] * Dj[[j]]
+      }
+    } else{
+      # do maximin w.r.t. 1st PC lengthscale estimates - you'd think this would be better
+      XcandSC = FlaGP:::sc_inputs(Xcand01,model$lengthscales$XT[[1]])
+      D = sqrt(plgp::distance(XcandSC,model$SC.inputs$XT.sim[[1]]))
+    }
   } else{
     # compute distances for candidate points to each model point
-    D = plgp::distance(Xcand01,model$XT.data$sim$X$trans)
+    D = sqrt(plgp::distance(Xcand01,model$XT.data$sim$X$trans))
   }
   # find distance to closest model X for each cand X
   mins = apply(D,1,min)
@@ -99,7 +110,7 @@ seq_design = function(model,n_cand=100,n_int=100,
   } else if(method=='rand'){
     return(seq_design_rand(model,Xcand01))
   } else if(method %in% c('maximin','maximin-scaled')){
-    return(seq_design_maximin(model,Xcand01,scaled = ifelse(method=='maximin-scaled',T,F)))
+    return(seq_design_maximin(model,Xcand01,scaled = ifelse(method=='maximin-scaled',T,F),n.pc=n.pc))
   } else{
     if(!XintGiven){
       Xint = lhs::maximinLHS(n_int,model$num$p.x + model$num$p.t)
