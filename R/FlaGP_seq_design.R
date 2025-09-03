@@ -202,10 +202,9 @@ seq_design = function(model,n_cand=100,n_int=100,
     }
 
     d_imse = imse_current - imse_new
-    which_cand = which.max(d_imse[d_imse>0])
+    which_cand = which.max(d_imse)
     if(length(which_cand)==0){
-      warning('No point reduced IMSE')
-      return()
+      warning(paste0('No point reduced IMSE, accepting point that increases imse by ',d_imse[which_cand],'\n'))
     }
 
     list(X_new = Xcand[which_cand,],
