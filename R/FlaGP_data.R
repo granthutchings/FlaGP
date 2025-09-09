@@ -281,7 +281,7 @@ mv_lengthscales = function(XT,p.x,p.t,V.t,g,subsample,m,K,seed,ls.prior,ls.paral
   n.pc = nrow(V.t)
   dConfig = laGP::darg(NULL,XT)
   if(nug.est){
-    gConfig = lapply(1:n.pc, function(i) FlaGP:::garg(list(mle=TRUE,start=g,min=1e-12,max=1e-4,ab=c(0,0)),V.t[i,]))
+    gConfig = lapply(1:n.pc, function(i) FlaGP:::garg(list(mle=TRUE,start=g,min=sqrt(.Machine$double.eps),max=1,ab=c(0,0)),V.t[i,]))
   } else{
     gConfig = lapply(1:n.pc, function(i) list(start=g))
   }
@@ -335,7 +335,7 @@ mv_lengthscales = function(XT,p.x,p.t,V.t,g,subsample,m,K,seed,ls.prior,ls.paral
       }
       sample.time = 0
     }
-    get_ls = function(XT,V.t,d,g,K,j){
+    get_ls = function(XT,V.t,d,g,K,j,nug.est){
       gp = laGP::newGPsep(X = XT,Z = V.t,d = d$start,g = g$start,dK = TRUE)
       mle = list(conv=1)
       i = 0
@@ -343,11 +343,11 @@ mv_lengthscales = function(XT,p.x,p.t,V.t,g,subsample,m,K,seed,ls.prior,ls.paral
       while(mle$conv==1 & i<=1000){
         if(nug.est){
           mle = laGP::jmleGPsep(gp,
-                               drange = c(d$min,10*d$max),
-                               grange = c(g$min,g$max),
-                               dab=d$ab,
-                               gab=g$ab,
-                               maxit=maxit)
+                                drange = c(d$min,10*d$max),
+                                grange = c(g$min,g$max),
+                                dab=d$ab,
+                                gab=g$ab,
+                                maxit=maxit)
           mle$conv = mle$dconv
         } else{
           mle = laGP::mleGPsep(gp,
@@ -376,9 +376,9 @@ mv_lengthscales = function(XT,p.x,p.t,V.t,g,subsample,m,K,seed,ls.prior,ls.paral
     }
     for(k in 1:K){
       if(ls.parallel){
-        tmp.ls[,,k] = foreach::foreach(j=1:n.pc,.combine='rbind') %dopar% get_ls(XT[samp.id[[k]],,drop=F],V.t[j,samp.id[[k]]],dConfig,gConfig[[j]],k,j)
+        tmp.ls[,,k] = foreach::foreach(j=1:n.pc,.combine='rbind') %dopar% get_ls(XT[samp.id[[k]],,drop=F],V.t[j,samp.id[[k]]],dConfig,gConfig[[j]],k,j,nug.est)
       } else{
-        tmp.ls[,,k] = t(sapply(1:n.pc, function(j) get_ls(XT[samp.id[[k]],,drop=F],V.t[j,samp.id[[k]]],dConfig,gConfig[[j]],k,j)))
+        tmp.ls[,,k] = t(sapply(1:n.pc, function(j) get_ls(XT[samp.id[[k]],,drop=F],V.t[j,samp.id[[k]]],dConfig,gConfig[[j]],k,j,nug.est)))
         ##### DEV #####
         # tried using mlegp - didn't seem to change much
         # tmp.ls[,,k] = t(sapply(1:n.pc, function(i) 1/nugget=g,nugget.known=1,verbose=0,simplex.ntries = 1)$beta))
@@ -753,6 +753,7 @@ flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                   
   if(!is.null(X.sim)){
     if(!is.matrix(X.sim)) # X.sim is a vector indicating scalar response, make it a matrix with 1 column
       X.sim = matrix(X.sim,ncol=1)
+    m = nrow(X.sim)
   }
   if(!is.null(y.ind.sim)){
     if(!is.matrix(y.ind.sim))
@@ -761,10 +762,13 @@ flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                   
   if(!is.null(T.sim)){
     if(!is.matrix(T.sim))
       T.sim = matrix(T.sim,ncol=1)
+    m = nrow(T.sim)
   }
   if(!is.null(Y.sim)){
     if(!is.matrix(Y.sim))
       Y.sim = matrix(Y.sim,ncol=1)
+    if(nrow(Y.sim) == m & ncol(Y.sim) != m)
+      Y.sim = t(Y.sim)
   }
   # obs
   if(!is.null(X.obs)){
@@ -801,7 +805,7 @@ flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                   
   }
 
   data = list(bias=bias,
-              num=list(m=ncol(Y.sim),
+              num=list(m=m,
                        n=max(0,ncol(Y.obs)),
                        p.x = max(0,ncol(X.sim)),
                        p.t = max(0,ncol(T.sim))))
