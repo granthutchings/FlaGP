@@ -513,7 +513,7 @@ mv_lengthscales = function(XT,p.x,p.t,V.t,g,subsample,m,K,seed,ls.prior,ls.paral
   }
 
   if(nug.est){
-    gConfig = lapply(1:n.pc, function(i) FlaGP:::garg(list(mle=TRUE,start=g,min=sqrt(.Machine$double.eps),max=1,ab=c(0,0)),V.t[i,]))
+    gConfig = lapply(1:n.pc, function(i) FlaGP:::garg(list(mle=TRUE,start=g[i],min=sqrt(.Machine$double.eps),max=1,ab=c(0,0)),V.t[i,]))
   } else{
     gConfig = lapply(1:n.pc, function(i) list(start=g[i]))
   }
