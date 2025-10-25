@@ -159,7 +159,7 @@ mv_delta_predict = function(X.pred.orig,delta,flagp,sample=F,n.samples=1, start=
 #' @param samp.ids which mcmc samples should be used for prediction
 #' @param return.samples return samples along with mean and confidence interval
 #' @param support predict on support of simulations or observations
-#' @param end.eta neighborhood size for lagp prediction
+#' @param NN neighborhood size for lagp prediction
 #' @param lagp.delta if a discrepancy model is fit, should discrepancy predictions be made with laGP? Default is a full GP.
 #' @param start.delta initial lagp neighborhood size for discrepancy. Only relevant if lagp.delta = T
 #' @param end.delta final lagp neighborhood size for discrepancy. Only relevant if lagp.delta = T
@@ -179,7 +179,7 @@ mv_delta_predict = function(X.pred.orig,delta,flagp,sample=F,n.samples=1, start=
 #' # See examples folder for R markdown notebooks.
 #'
 predict.flagp = function(flagp,model=NULL,X.pred.orig=NULL,n.samples=0,samp.ids=NULL,return.samples=F,support='obs',
-                         end.eta=50,lagp.delta=F,start.delta=6,end.delta=50,return.eta=F,return.delta=F,
+                         NN=50,lagp.delta=F,start.delta=6,end.delta=50,return.eta=F,return.delta=F,
                          y=T, native=T, y.conf.int= T, joint = F,
                          resid.error = F, w.var = T, y.var = T, y.samp = T, verbose=T, alpha=.05, X01=F,
                          n.pc=flagp$basis$sim$n.pc, parallel = F, make.cluster = F)
@@ -192,25 +192,25 @@ predict.flagp = function(flagp,model=NULL,X.pred.orig=NULL,n.samples=0,samp.ids=
     if(class(model)[1] == 'mcmc'){
       if(verbose)
         cat('MCMC object given. Drawing predictive samples from posterior distribution.')
-      # pred = mcmc_predict(flagp,model,X.pred.orig,samp.ids,n.samples,return.samples,support,end.eta,start.delta,end.delta,
+      # pred = mcmc_predict(flagp,model,X.pred.orig,samp.ids,n.samples,return.samples,support,NN,start.delta,end.delta,
       #                     return.eta,return.delta,native,y.conf.int,resid.error,w.var,y.var)
       pred = mcmc_predict_joint(flagp, model, X.pred.orig, n.samples, samp.ids,
                                 support, native, joint,
-                                end.eta, start.delta, end.delta,
+                                NN, start.delta, end.delta,
                                 return.eta, return.delta,
                                 resid.error, y.var, y.samp, y.conf.int, alpha)
     } else if(class(model)[1] == 'map'){
       if(is.null(model$Cov)){
         if(verbose)
           cat('MAP object without covariance given. Drawing samples from predictive distribution at MLE.')
-        pred = map_predict(flagp,model,X.pred.orig,n.samples,return.samples,support,end.eta,start.delta,end.delta,
+        pred = map_predict(flagp,model,X.pred.orig,n.samples,return.samples,support,NN,start.delta,end.delta,
                            y,native,y.conf.int,resid.error,w.var,y.var,alpha,return.eta,return.delta,verbose)
       } else{
         # we have the covariance matrix from the optimization, so take samples and do mcmc predict
         if(verbose)
           cat('MAP object with covariance given. Drawing samples from covariance matrix and making predictions.')
         pred = sample_predict(flagp, model, X.pred.orig, n.samples, return.samples, support,
-                               end.eta, start.delta, end.delta, return.eta, return.delta,
+                               NN, start.delta, end.delta, return.eta, return.delta,
                                native, y.conf.int,
                                resid.error, w.var,y.var)
       }
@@ -225,7 +225,7 @@ predict.flagp = function(flagp,model=NULL,X.pred.orig=NULL,n.samples=0,samp.ids=
       stop('must give X.pred.orig')
     if(X01)
       X.pred.orig = t((t(X.pred.orig) * flagp$XT.data$sim$X$range) + flagp$XT.data$sim$X$min)
-    pred = em_only_predict(flagp,X.pred.orig,n.samples,support,end.eta,y,native,return.samples,y.conf.int,w.var,y.var,alpha,n.pc,parallel)
+    pred = em_only_predict(flagp,X.pred.orig,n.samples,support,NN,y,native,return.samples,y.conf.int,w.var,y.var,alpha,n.pc,parallel)
   }
 
   return(pred)
@@ -302,7 +302,7 @@ map_predict = function(flagp,map,X.pred.orig,n.samples,return.samples,support,
 
   # emulator predictions
   start.time = proc.time()[3]
-  w = predict_w(flagp,X.pred.orig,theta,end=end.eta,w.var=w.var,n.pc=n.pc)
+  w = predict_w(flagp,X.pred.orig,theta,end=NN,w.var=w.var,n.pc=n.pc)
   returns$time = proc.time()[3] - start.time
 
   if(!flagp$bias & y){
@@ -435,7 +435,7 @@ mcmc_predict_joint = function(flagp, mcmc, X.pred.orig=NULL, n.samples=length(mc
   ptm = proc.time()[3]
   for(i in 1:n.samples){
     # get w
-    w = predict_w(flagp,X.pred.orig,t.pred[i,],sample=F,w.var=T,end=end.eta,n.pc=n.pc)
+    w = predict_w(flagp,X.pred.orig,t.pred[i,],sample=F,w.var=T,end=NN,n.pc=n.pc)
     # get v
     if(flagp$bias){
       v = FlaGP:::mv_delta_predict(X.pred.orig,mcmc$delta[[i]],flagp,sample=F,start=start.delta,end=end.delta)
@@ -520,7 +520,7 @@ mcmc_predict = function(flagp ,mcmc, X.pred.orig, samp.ids, n.samples, return.sa
     start.time = proc.time()[3]
     for(i in 1:n.samples){
       # just get w, v predictions for timing
-      w = predict_w(flagp[[k]],X.pred.orig,t.pred[i,],sample=T,end=end.eta,n.pc=flagp[[k]]$basis$sim$n.pc)
+      w = predict_w(flagp[[k]],X.pred.orig,t.pred[i,],sample=T,end=NN,n.pc=flagp[[k]]$basis$sim$n.pc)
       returns[[k]]$eta.samp[i,,] = B%*%drop(w$sample)
 
       if(flagp[[k]]$bias){
@@ -532,7 +532,7 @@ mcmc_predict = function(flagp ,mcmc, X.pred.orig, samp.ids, n.samples, return.sa
     returns[[k]]$time = proc.time()[3] - start.time
 
     for(i in 1:n.samples){
-      # w = predict_w(flagp[[k]],X.pred.orig,t.pred[i,],sample=T,end=end.eta,n.pc=flagp[[k]]$basis$sim$n.pc)
+      # w = predict_w(flagp[[k]],X.pred.orig,t.pred[i,],sample=T,end=NN,n.pc=flagp[[k]]$basis$sim$n.pc)
       # returns[[k]]$eta.samp[i,,] = B%*%drop(w$sample)
 
       if(flagp[[k]]$bias){
@@ -650,7 +650,7 @@ sample_predict = function(flagp, model, X.pred.orig, n.samples, return.samples, 
       returns[[k]]$delta.samp = array(0,dim=c(n.samples,n.y,n.pred))
     start.time = proc.time()[3]
     for(i in 1:n.samples){
-      w = predict_w(flagp[[k]],X.pred.orig,t.pred[i,],sample=T,end=end.eta,n.pc=flagp[[k]]$basis$sim$n.pc)
+      w = predict_w(flagp[[k]],X.pred.orig,t.pred[i,],sample=T,end=NN,n.pc=flagp[[k]]$basis$sim$n.pc)
       returns[[k]]$eta.samp[i,,] = B%*%drop(w$sample)
 
       if(flagp[[k]]$bias){

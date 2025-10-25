@@ -1,9 +1,13 @@
 library(FlaGP)
 library(Rtools)
 library(doParallel)
-load = FALSE
+
+n.pc.sd = 1
+method = 'imspe'
+
+load = TRUE
 load_data = TRUE
-loadfile = 'examples/Aluminum/seq_design/imse_8_PC_refit_50_test_set_no_boot_results.RData'
+loadfile = 'examples/Aluminum/seq_design/imspe_1_PC_refit_50_test_set_no_boot_results_nugget.RData'
 if(load){
   load(loadfile)
   start = i + 1
@@ -78,11 +82,12 @@ if(load){
 
   # define model and fit emulator
   model.em = flagp(X.sim = X_init$lhs, Y.sim = t(Y_init), y.ind.sim = matrix(time_all),
-                  transform_x = F,
-                  pct.var = .99, seed = 123,
-                  ls.subsample = 'strat', ls.subsample.size = 1024, ls.K = 1,
-                  nug.est = T, ls.parallel = T, rsvd = F, ls.nugget = 1e-8) # not estimating a nugget can cause problems for the fitting procedure
+                   transform_x = F,
+                   pct.var = .99, seed = 123,
+                   ls.subsample = 'strat', ls.subsample.size = 1024, ls.K = 1,
+                   nug.est = T, ls.parallel = F, rsvd = F, ls.nugget = 1e-3) # not estimating a nugget can cause problems for the fitting procedure
   model.em$lengthscales$XT[[1]]
+  model.em$lengthscales$g
   cumsum(model.em$basis$sim$pct.var)
 
   # this makes me wonder if we should take the active learning approach to basis vectors. SVD is not great here,
@@ -99,8 +104,6 @@ if(load){
   n_points_to_add = 500
   refitevery = 50
   plotevery = 5
-  n.pc.sd = 1
-  method = 'maxvar'
   flagp.model = list()
   flagp.model[[1]] = model.em
   xcandflagp = X_cand$lhs
@@ -164,7 +167,7 @@ for(i in start:n_points_to_add){
   imse[i+1] = mean(flagp.pred$y.var)
   rmse[i+1] = Rtools:::get_rmse(flagp.pred$y.mean,t(Y_test))
   cat('rmse prev:',rmse[i],' rmse new:',rmse[i+1],'\n')
-  
+
   # if(refit & rmse[i+1]>rmse[i]){
   #   while(rmse[i+1]>rmse[i]){
   #     k = k + 1
@@ -186,10 +189,6 @@ for(i in start:n_points_to_add){
   if(m%%50==0 | i==n_points_to_add | difftime(current_time, last_save_time, units = "secs") >= 3600){
     last_save_time = current_time
     cat('saving current status \n')
-    if(method %in% c('maximin','maximin-scaled')){
-      save.image(file = paste0('examples/Aluminum/seq_design/',method,'_refit_',refitevery,'_test_set_no_boot_results_nugget.RData'))
-    } else{
-      save.image(file = paste0('examples/Aluminum/seq_design/',method,'_',n.pc.sd,'_PC_refit_',refitevery,'_test_set_no_boot_results_nugget.RData'))
-    }
+    save.image(file = paste0('examples/Aluminum/seq_design/',method,'_',n.pc.sd,'_PC_refit_',refitevery,'_test_set_no_boot_results_nugget.RData'))
   }
 }

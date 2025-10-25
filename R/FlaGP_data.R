@@ -513,7 +513,7 @@ mv_lengthscales = function(XT,p.x,p.t,V.t,g,subsample,m,K,seed,ls.prior,ls.paral
   }
 
   if(nug.est){
-    gConfig = lapply(1:n.pc, function(i) FlaGP:::garg(list(mle=TRUE,start=g[i],min=sqrt(.Machine$double.eps),max=1,ab=c(0,0)),V.t[i,]))
+    gConfig = lapply(1:n.pc, function(i) FlaGP:::garg(list(mle=TRUE,start=g,min=sqrt(.Machine$double.eps),max=1,ab=c(0,0)),V.t[i,]))
   } else{
     gConfig = lapply(1:n.pc, function(i) list(start=g[i]))
   }
@@ -567,7 +567,7 @@ mv_lengthscales = function(XT,p.x,p.t,V.t,g,subsample,m,K,seed,ls.prior,ls.paral
       }
       sample.time = 0
     }
-    get_ls = function(XT,V.t,d,g,K,j){
+    get_ls = function(XT,V.t,d,g,K,j,nug.est){
       gp = laGP::newGPsep(X = XT,Z = V.t,d = d$start,g = g$start,dK = TRUE)
       mle = list(conv=1)
       i = 0
@@ -575,11 +575,11 @@ mv_lengthscales = function(XT,p.x,p.t,V.t,g,subsample,m,K,seed,ls.prior,ls.paral
       while(mle$conv==1 & i<=1000){
         if(nug.est){
           mle = laGP::jmleGPsep(gp,
-                               drange = c(d$min,10*d$max),
-                               grange = c(g$min,g$max),
-                               dab=d$ab,
-                               gab=g$ab,
-                               maxit=maxit)
+                                drange = c(d$min,10*d$max),
+                                grange = c(g$min,g$max),
+                                dab=d$ab,
+                                gab=g$ab,
+                                maxit=maxit)
           mle$conv = mle$dconv
         } else{
           mle = laGP::mleGPsep(gp,
@@ -608,9 +608,9 @@ mv_lengthscales = function(XT,p.x,p.t,V.t,g,subsample,m,K,seed,ls.prior,ls.paral
     }
     for(k in 1:K){
       if(ls.parallel){
-        tmp.ls[,,k] = foreach::foreach(j=1:n.pc,.combine='rbind') %dopar% get_ls(XT[samp.id[[k]],,drop=F],V.t[j,samp.id[[k]]],dConfig[[j]],gConfig[[j]],k,j)
+        tmp.ls[,,k] = foreach::foreach(j=1:n.pc,.combine='rbind') %dopar% get_ls(XT[samp.id[[k]],,drop=F],V.t[j,samp.id[[k]]],dConfig,gConfig[[j]],k,j,nug.est)
       } else{
-        tmp.ls[,,k] = t(sapply(1:n.pc, function(j) get_ls(XT[samp.id[[k]],,drop=F],V.t[j,samp.id[[k]]],dConfig[[j]],gConfig[[j]],k,j)))
+        tmp.ls[,,k] = t(sapply(1:n.pc, function(j) get_ls(XT[samp.id[[k]],,drop=F],V.t[j,samp.id[[k]]],dConfig,gConfig[[j]],k,j,nug.est)))
         ##### DEV #####
         # tried using mlegp - didn't seem to change much
         # tmp.ls[,,k] = t(sapply(1:n.pc, function(i) 1/nugget=g,nugget.known=1,verbose=0,simplex.ntries = 1)$beta))
@@ -916,6 +916,221 @@ print.flagp = function(flagp){
   cat('dim Y.sim:', dim(flagp$Y.data$sim$orig),'\n')
   if(!is.null(flagp$Y.data$obs$orig))
     cat('dim Y.obs:', dim(flagp$Y.data$obs$orig),'\n')
+}
+
+#' @title FlaGP data object constructor
+#'
+#' @description Builds FlaGP data object and does necessary precomputing
+#' @param X.sim experimental inputs for simulator output data
+#' @param T.sim calibration inputs for simulator output data
+#' @param X.obs observed inputs for experimental data
+#' @param T.obs optional "known" calibration parameters for observations. This parameter does nothing in the model, but the data object will store scaled copies of it so it can be compared to calibration results
+#' @param Y.sim simulator output matrix
+#' @param y.ind.sim data indices for functional response simulations
+#' @param Y.obs observed data matrix
+#' @param y.ind.obs data indices for functional response observations
+#' @param center center simulations to mean zero
+#' @param scale scale simulations to unit variance
+#' @param scaletype "scalar" or "rowwise" scaling to unit variance. Functional outputs should likely use "scalar" and multivariate outputs with different units should use "rowwise"
+#' @param n.pc number of basis components to use for emulation. Defaults to 95% variance explained.
+#' @param pct.var choose number of basis components s.t. this proportion of variation is accounted for in simulations. Defaults to 95% variance explained.
+#' @param B optional matrix of basis vectors, if null B is computed via SVD(Y.sim)
+#' @param V.t optional precomputed matrix of simulation weights for B
+#' @param sigma.y assumed standard error of observations (not currently implemented)
+#' @param ls.subsample type of subsampling procedure for lengthscale estimation. default 'blhs' is bootstrapped block latin hypercube sampling, 'strat' is stratified random sampling, and 'rand' is random sampling. Otherwise no subsampling is used.
+#' @param ls.nugget gp nugget for lengthscale estimation
+#' @param ls.m m parameter in laGP::blhs controlling data blocking for LHS subsample. Larger m will result in faster lengthscale estimation but is more memory intensive.
+#' @param ls.K Number of bootstrap replicate estimations to do when ls.subsample is 'blhs','strat', or 'rand'. Estimates can be highly variable for small K.
+#' @param ls.prior use detault prior in laGP::newGP for MAP lengthscale estimation, if FALSE, MLE estimation
+#' @param ls.parallel do lengthscale estimation in parallel
+#' @param ls.subsample.size size of subsamples when ls.subsample is 'strat' or 'rand'
+#' @param bias calibration with a discrepancy model
+#' @param D matrix of basis vectors for discrepancy model
+#' @param small return small (memory) data object
+#' @param verbose print status updates while building data object and doing precomputing
+#' @param rsvd use random svd for fast svd calculations on massive Y.sim matrices. Must specify n.pc.
+#' @details Returns FlaGP data object
+#' @export
+#' @examples
+#' # See examples folder for R markdown notebooks.
+#'
+flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                                           # X and T data
+                 Y.sim,y.ind.sim=NULL,Y.obs=NULL,y.ind.obs=NULL,center=T,scale=T,scaletype='scalar', # Y data
+                 X.min=NULL,X.range=NULL,transform_x=T,
+                 n.pc = NULL, pct.var = .95, B = NULL, V.t = NULL, sigma.y=NULL,                     # sim basis
+                 ls.subsample = 'strat', ls.nugget=1e-7, ls.m = 1, ls.K = 1, ls.prior=T, ls.parallel=T, make.cluster=T, ls.subsample.size = 250, # length scale estimation
+                 bias=F,D=NULL,                                                                      # discrepancy
+                 small=F,seed=NULL,verbose=T,
+                 rsvd = F, nug.est = T){                                                       # additional flags
+
+
+  if(bias & is.null(D)){
+    warnings('No D basis given, proceding with discrepancy free model.')
+    bias = F
+  }
+  if(!is.null(D)){
+    bias = T
+  }
+
+  # we need a dummy x if
+  dummy_x = !is.null(Y.obs) & is.null(X.obs)
+
+  if(dummy_x){
+    X.obs = matrix(rep(.5,ncol(Y.obs)),ncol=1)
+    if(is.null(X.sim))
+      X.sim = matrix(rep(.5,ncol(Y.sim)),ncol=1)
+  }
+
+  # sim
+  if(!is.null(X.sim)){
+    if(!is.matrix(X.sim)) # X.sim is a vector indicating scalar response, make it a matrix with 1 column
+      X.sim = matrix(X.sim,ncol=1)
+    m = nrow(X.sim)
+  }
+  if(!is.null(y.ind.sim)){
+    if(!is.matrix(y.ind.sim))
+      y.ind.sim = matrix(y.ind.sim,ncol=1)
+  }
+  if(!is.null(T.sim)){
+    if(!is.matrix(T.sim))
+      T.sim = matrix(T.sim,ncol=1)
+    m = nrow(T.sim)
+  }
+  if(!is.null(Y.sim)){
+    if(!is.matrix(Y.sim))
+      Y.sim = matrix(Y.sim,ncol=1)
+    if(nrow(Y.sim) == m & ncol(Y.sim) != m)
+      Y.sim = t(Y.sim)
+  }
+  # obs
+  if(!is.null(X.obs)){
+    if(!is.matrix(X.obs))
+      X.obs = matrix(X.obs,ncol=1)
+  }
+  if(!is.null(y.ind.obs)){
+    if(!is.matrix(y.ind.obs))
+      y.ind.obs = matrix(y.ind.obs,ncol=1)
+  }
+  if(!is.null(Y.obs) & !is.list(Y.obs)){
+    if(!is.matrix(Y.obs))
+      Y.obs = matrix(Y.obs,ncol=1)
+  }
+
+  # force certain parameters if scalar response
+  if(ncol(Y.sim)==1){
+    responsetype = 'scalar'
+    y.ind.sim = matrix(1)
+    if(!is.null(Y.obs))
+      y.ind.obs = matrix(1)
+    scaletype = 'scalar' # force this for scalar response
+    B = matrix(1)
+    if(bias){
+      D = matrix(1)
+    } else{
+      D = NULL
+    }
+    rsvd = F
+    n.pc = 1
+    pct.var = NULL
+  } else{
+    responsetype = 'functional'
+  }
+
+  data = list(bias=bias,
+              num=list(m=m,
+                       n=max(0,ncol(Y.obs)),
+                       p.x = max(0,ncol(X.sim)),
+                       p.t = max(0,ncol(T.sim))))
+
+  # print information about data
+  if(verbose){
+    cat('Building FlaGP data object.\n')
+    cat('Response:', responsetype, '\n')
+    cat('m:', data$num$m,'\n')
+    cat('n:', data$num$n,'\n')
+    if(is.null(n.pc)){
+      cat('pct.var:', pct.var,'\n')
+    } else{
+      cat('n.pc:', n.pc,'\n')
+    }
+    cat('p.x:',data$num$p.x,'\n')
+    cat('p.t:',data$num$p.t,'\n')
+    cat('dim Y.sim:', dim(Y.sim),'\n')
+    if(!is.null(Y.obs))
+      cat('dim Y.obs:', dim(Y.obs),'\n')
+  }
+  if(bias & data$num$n<5){
+    warning(paste0('For one or more of the experiments, a discrepancy model will be a GP fit to only n=',data$num$n,' data points.\n'))
+  }
+  # precomputing and data building including lengthscale estimation
+  start.time = proc.time()[3]
+  if(verbose){cat('transforming X,T... ')}
+  data$XT.data = transform_xt(X.sim,T.sim,X.obs,T.obs,X.min,X.range,do_transform = transform_x)
+  if(verbose){cat('done.\n')}
+  if(verbose){cat('transforming Y... ')}
+  data$Y.data = transform_y(Y.sim,y.ind.sim,Y.obs,y.ind.obs,center,scale,scaletype,responsetype)
+  if(verbose){cat('done.\n')}
+  if(verbose){cat('computing sim basis... ')}
+  data$basis = list(); class(data$basis) = c('basis',class(data$basis))
+  data$basis$sim = get_basis(data$Y.data$sim$trans,n.pc,pct.var,F,B,V.t,bias=bias,D=D,rsvd=rsvd)
+  if(verbose){cat('done.\n')}
+  if(!is.null(Y.obs)){
+    precomp = TRUE
+    if(verbose){cat('computing obs basis... ')}
+    data$basis$obs = get_obs_basis(data$basis$sim,data$Y.data$obs$trans,y.ind.sim,y.ind.obs,sigma.y)
+    if(verbose){cat('done.\n')}
+  } else{
+    # em only
+    data$basis$obs = NULL
+    precomp = FALSE
+  }
+
+  # for comparison it's useful to know how long it took to fit the model without any data precomputing before
+  fit.time = proc.time()
+  if(verbose){cat('estimating lengthscale parameters... ')}
+  data$lengthscales = mv_lengthscales(cbind(data$XT.data$sim$X$trans,data$XT.data$sim$T$trans),data$num$p.x,data$num$p.t,
+                                      data$basis$sim$V.t,ls.nugget,ls.subsample,ls.m,ls.K,seed,ls.prior,ls.parallel,make.cluster,ls.subsample.size,nug.est=nug.est,verbose=verbose)
+  data$num$g = data$lengthscales$g
+  if(verbose){cat('done.\n')}
+  if(verbose){cat('stretching and compressing inputs... ')}
+  data$SC.inputs = get_SC_inputs(data$lengthscales, data$XT.data, data$basis$sim$n.pc)
+  if(verbose){cat('done.\n')}
+  fit.time = fit.time[3] - proc.time()[3]
+
+  if(precomp){
+    precomp.start.time = proc.time()[3]
+    if(verbose){cat('precomputing for fast calibration... ')}
+    # do precomputing necessary for calibration
+    precomp = list()
+    BD = cbind(data$basis$obs$B,
+               data$basis$obs$D)
+    precomp$rankBD = pracma::Rank(BD)
+    BDtBD = crossprod(BD)
+    precomp$BDtBDinv = chol2inv(chol(BDtBD + 1e-8*diag(1,nrow(BDtBD))))
+    precomp$ldetBDtBD = determinant(BDtBD)$modulus
+    precomp$BDtBDinvtBD = tcrossprod(precomp$BDtBDinv,BD)
+    precomp$LLHmat = diag(1,data$Y.data$obs$n.y)-BD%*%tcrossprod(precomp$BDtBDinv,BD)
+    data$precomp = precomp
+    data$precomp$time = proc.time()[3] - precomp.start.time
+    if(verbose){cat('done.\n')}
+  } else{
+    data$precomp = NULL
+  }
+  if(small){
+    # do not store potentially large data matrices
+    data$Y.data$sim$orig = NULL
+    data$Y.data$sim$trans = NULL
+  }
+  data$time = proc.time()[3] - start.time
+  # some useful flags for remembering how the model was called
+
+  data$flags = list(center=center,scale=scale,scaletype=scaletype,
+                    responsetype=responsetype,bias=bias,
+                    rsvd=rsvd,n.pc=n.pc,pct.var=pct.var,
+                    ls.nugget=ls.nugget,nug.est=nug.est,ls.K=ls.K,ls.m=ls.m,
+                    ls.subsample=ls.subsample,ls.parallel=ls.parallel,ls.subsample.size=ls.subsample.size)
+  class(data) = c('flagp',class(data))
+  return(data)
 }
 
 #' @title update FlaGP model
