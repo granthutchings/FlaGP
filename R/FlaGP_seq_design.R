@@ -8,7 +8,7 @@ seq_design_max_var_y = function(model,Xcand01,n.pc=model$basis$sim$n.pc,end=50,p
 
   # predict from the model at all candidate locations
   pred = predict(model,X.pred.orig = Xcand01, verbose = F, y.var=T, X01=T,
-                 n.pc=min(n.pc,model$basis$sim$n.pc),end.eta = end, parallel=parallel)
+                 n.pc=min(n.pc,model$basis$sim$n.pc),NN = end, parallel=parallel)
   predvar = colMeans(pred$y.var)
   # return the X which has the largest prediction variance
   id = which.max(predvar)
@@ -155,11 +155,11 @@ seq_design = function(model,n_cand=100,n_int=100,
       imse_current_x = XintPredVars
       recompute = which(is.na(imse_current_x))
       if(length(recompute)>0){
-        pred = predict(model,X.pred.orig = Xint[recompute,,drop=F], verbose = F,end.eta=end,y.var = T,n.pc=n.pc,X01=T,resid.error = F, parallel = parallel)
+        pred = predict(model,X.pred.orig = Xint[recompute,,drop=F], verbose = F,NN=end,y.var = T,n.pc=n.pc,X01=T,resid.error = F, parallel = parallel)
         imse_current_x[recompute] = colMeans(pred$y.var)
       }
     } else{
-      pred = predict(model,X.pred.orig = Xint, verbose = F,end.eta=end,y.var = T,n.pc=n.pc,X01=T,resid.error = F, parallel = parallel)
+      pred = predict(model,X.pred.orig = Xint, verbose = F,NN=end,y.var = T,n.pc=n.pc,X01=T,resid.error = F, parallel = parallel)
       imse_current_x = colMeans(pred$y.var)
     }
     imse_current = mean(imse_current_x)
@@ -170,7 +170,7 @@ seq_design = function(model,n_cand=100,n_int=100,
     # IMSE depends on y, so we need to add the new y (which we don't know), so lets predict it
     # unfortunately this prediction may be poor, not sure if there's any way around this. So, adding a point based on
     # a predicted y, then replacing that predicted y with the true y is likely to lead to instability in IMSE.
-    pred_cand = predict(model,X.pred.orig = Xcand01, verbose = F,end.eta=end, y.var=F,n.pc=n.pc,X01=T, parallel = parallel)
+    pred_cand = predict(model,X.pred.orig = Xcand01, verbose = F,NN=end, y.var=F,n.pc=n.pc,X01=T, parallel = parallel)
 
     if(verbose){
       cat('searching candidate space ... \n')
@@ -208,7 +208,7 @@ seq_design = function(model,n_cand=100,n_int=100,
       # compute new IMSE
       imse_cand_x[[i]] = imse_current_x
       if(length(int_points_to_do[[i]])>0){
-        pred_int = predict(model_tmp,X.pred.orig = Xint[int_points_to_do[[i]],,drop=F], verbose = F,end.eta=end,y.var=T,n.pc=n.pc,X01=T, parallel = parallel)
+        pred_int = predict(model_tmp,X.pred.orig = Xint[int_points_to_do[[i]],,drop=F], verbose = F,NN=end,y.var=T,n.pc=n.pc,X01=T, parallel = parallel)
         imse_cand_x[[i]][int_points_to_do[[i]]] = colMeans(pred_int$y.var)
       }
       imse_new[i] = mean(imse_cand_x[[i]])
