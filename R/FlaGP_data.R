@@ -726,7 +726,8 @@ flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                   
                  Y.sim,y.ind.sim=NULL,Y.obs=NULL,y.ind.obs=NULL,center=T,scale=T,scaletype='scalar', # Y data
                  X.min=NULL,X.range=NULL,transform_x=T,
                  n.pc = NULL, pct.var = .95, B = NULL, V.t = NULL, sigma.y=NULL,                     # sim basis
-                 ls.subsample = 'strat', ls.nugget=1e-7, ls.m = 1, ls.K = 1, ls.prior=T, ls.parallel=T, make.cluster=T, ls.subsample.size = 250, # length scale estimation
+                 ls.subsample = 'strat', ls.nugget=1e-7, ls.m = 1, ls.K = 1, ls.prior=T, 
+                 ls.parallel=T, make.cluster=T, ls.subsample.size = 250, # length scale estimation
                  bias=F,D=NULL,                                                                      # discrepancy
                  small=F,seed=NULL,verbose=T,
                  rsvd = F, nug.est = T){                                                       # additional flags
