@@ -12,3 +12,4 @@ src/*.so
 .Rproj.user
 examples/Aluminum
 examples/multivariate_sepia
+.positai
