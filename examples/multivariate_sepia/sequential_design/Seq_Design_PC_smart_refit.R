@@ -11,7 +11,7 @@ plot_during_seqd = T
 save_results = F
 
 ##########################
-method = 'imse'
+method = 'maximin-scaled'
 n.pc.sd = 1
 ##########################
 
