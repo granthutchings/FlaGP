@@ -302,7 +302,7 @@ map_predict = function(flagp,map,X.pred.orig,n.samples,return.samples,support,
 
   # emulator predictions
   start.time = proc.time()[3]
-  w = predict_w(flagp,X.pred.orig,theta,end=NN,w.var=w.var,n.pc=n.pc)
+  w = predict_w(flagp,X.pred.orig,theta,end=end.eta,w.var=w.var,n.pc=n.pc)
   returns$time = proc.time()[3] - start.time
 
   if(!flagp$bias & y){
@@ -435,7 +435,7 @@ mcmc_predict_joint = function(flagp, mcmc, X.pred.orig=NULL, n.samples=length(mc
   ptm = proc.time()[3]
   for(i in 1:n.samples){
     # get w
-    w = predict_w(flagp,X.pred.orig,t.pred[i,],sample=F,w.var=T,end=NN,n.pc=n.pc)
+    w = predict_w(flagp,X.pred.orig,t.pred[i,],sample=F,w.var=T,end=end.eta,n.pc=n.pc)
     # get v
     if(flagp$bias){
       v = FlaGP:::mv_delta_predict(X.pred.orig,mcmc$delta[[i]],flagp,sample=F,start=start.delta,end=end.delta)
@@ -520,7 +520,7 @@ mcmc_predict = function(flagp ,mcmc, X.pred.orig, samp.ids, n.samples, return.sa
     start.time = proc.time()[3]
     for(i in 1:n.samples){
       # just get w, v predictions for timing
-      w = predict_w(flagp[[k]],X.pred.orig,t.pred[i,],sample=T,end=NN,n.pc=flagp[[k]]$basis$sim$n.pc)
+      w = predict_w(flagp[[k]],X.pred.orig,t.pred[i,],sample=T,end=end.eta,n.pc=flagp[[k]]$basis$sim$n.pc)
       returns[[k]]$eta.samp[i,,] = B%*%drop(w$sample)
 
       if(flagp[[k]]$bias){
@@ -650,7 +650,7 @@ sample_predict = function(flagp, model, X.pred.orig, n.samples, return.samples, 
       returns[[k]]$delta.samp = array(0,dim=c(n.samples,n.y,n.pred))
     start.time = proc.time()[3]
     for(i in 1:n.samples){
-      w = predict_w(flagp[[k]],X.pred.orig,t.pred[i,],sample=T,end=NN,n.pc=flagp[[k]]$basis$sim$n.pc)
+      w = predict_w(flagp[[k]],X.pred.orig,t.pred[i,],sample=T,end=end.eta,n.pc=flagp[[k]]$basis$sim$n.pc)
       returns[[k]]$eta.samp[i,,] = B%*%drop(w$sample)
 
       if(flagp[[k]]$bias){
@@ -761,7 +761,7 @@ em_only_predict = function(flagp, X.pred.orig, n.samples, support, end.eta, y, n
       }
     }
   }
-  if(y.conf.int){
+  if(y.var & y.conf.int){
     n.y = flagp$Y.data$sim$n.y
     returns$y.conf.int = array(dim=c(2,n.y,n.pred))
     returns$y.conf.int[1,,] = qnorm(alpha/2,returns$y.mean,sqrt(returns$y.var))

@@ -11,19 +11,19 @@ w_to_y = function(w,B,mean=NULL,sd=NULL){
 
 # FUNCTION: get_basis
 {### Accepts a matrix of response values Y, and returns the basis decomposition from SVD
-## Parameters:
-# Y (numeric)       : matrix of response values to decompose into basis representation. Y should be
-#                     formatted such that each row represents the multivariate response for a single experiment
-# n.pc (int)        : number of principal components desired from basis decomposition
-# pct.var (numeric) : desired percentage of variability explained by PC's. Overrides n.pc if specified
-## Returns: List containings the following
-# B (numeric)       : matrix of n.pc basis vectors for Ytrans
-# V.t (numeric)      : matrix of n.pc response vectors for Ytrans
-# n.pc (integer)    : number of PC's used for the basis decomposition
-## Calls:
-## Called by:
-# user when generating sim basis
-# mv_calib.bias for generating discrepancy basis
+  ## Parameters:
+  # Y (numeric)       : matrix of response values to decompose into basis representation. Y should be
+  #                     formatted such that each row represents the multivariate response for a single experiment
+  # n.pc (int)        : number of principal components desired from basis decomposition
+  # pct.var (numeric) : desired percentage of variability explained by PC's. Overrides n.pc if specified
+  ## Returns: List containings the following
+  # B (numeric)       : matrix of n.pc basis vectors for Ytrans
+  # V.t (numeric)      : matrix of n.pc response vectors for Ytrans
+  # n.pc (integer)    : number of PC's used for the basis decomposition
+  ## Calls:
+  ## Called by:
+  # user when generating sim basis
+  # mv_calib.bias for generating discrepancy basis
 }
 get_basis = function(Y, n.pc = NULL, pct.var = .95, full.basis=F, B=NULL, V.t = NULL, bias=FALSE, D=NULL,
                      rsvd=FALSE, k = NULL, nu = NULL, nv = NULL, p = 10, q = 2, sdist = "normal"){
@@ -91,17 +91,17 @@ get_basis = function(Y, n.pc = NULL, pct.var = .95, full.basis=F, B=NULL, V.t = 
 
 # FUNCTION: get_obs_basis
 {### Generated obs basis vectors by interpolating sim basis vectors
-## Parameters:
-# sim.basis       : output from get_basis
-# Y.obs        : matrix (n.y x n) field data
-# y.ind.sim : matrix of field data indices of observation
-## Returns: List containings the following
-# B (numeric)       : matrix of n.pc basis vectors
-# V.t (numeric)      : matrix of n.pc response vectors
-# n.pc (integer)    : number of PC's used for the basis decomposition
-## Calls:
-## Called by:
-# user when generating obs basis
+  ## Parameters:
+  # sim.basis       : output from get_basis
+  # Y.obs        : matrix (n.y x n) field data
+  # y.ind.sim : matrix of field data indices of observation
+  ## Returns: List containings the following
+  # B (numeric)       : matrix of n.pc basis vectors
+  # V.t (numeric)      : matrix of n.pc response vectors
+  # n.pc (integer)    : number of PC's used for the basis decomposition
+  ## Calls:
+  ## Called by:
+  # user when generating obs basis
 }
 get_obs_basis = function(sim.basis,Y.obs,y.ind.sim,y.ind.obs,sigma.y=NULL){
   obs.basis = list()
@@ -726,7 +726,8 @@ flagp = function(X.sim=NULL,T.sim=NULL,X.obs=NULL,T.obs=NULL,                   
                  Y.sim,y.ind.sim=NULL,Y.obs=NULL,y.ind.obs=NULL,center=T,scale=T,scaletype='scalar', # Y data
                  X.min=NULL,X.range=NULL,transform_x=T,
                  n.pc = NULL, pct.var = .95, B = NULL, V.t = NULL, sigma.y=NULL,                     # sim basis
-                 ls.subsample = 'strat', ls.nugget=1e-7, ls.m = 1, ls.K = 1, ls.prior=T, ls.parallel=T, make.cluster=T, ls.subsample.size = 250, # length scale estimation
+                 ls.subsample = 'strat', ls.nugget=1e-7, ls.m = 1, ls.K = 1, ls.prior=T, 
+                 ls.parallel=T, make.cluster=T, ls.subsample.size = 250, # length scale estimation
                  bias=F,D=NULL,                                                                      # discrepancy
                  small=F,seed=NULL,verbose=T,
                  rsvd = F, nug.est = T){                                                       # additional flags
@@ -1031,7 +1032,7 @@ blhs.loop.lite = function (y, X, m, K, da, g, ga, nug.est=F,maxit = 100)
       #                    g = g, dK = TRUE)
       if(nug.est){
         mle <- laGP::jmleGPsep(gpsepi, drange=c(da$min,10*da$max), grange=c(ga$min,ga$max),
-                              dab = da$ab, gab=ga$ab, maxit = maxit)
+                               dab = da$ab, gab=ga$ab, maxit = maxit)
         mle$conv=mle$dconv
       } else{
         mle <- laGP::mleGPsep(gpsepi, tmin = da$min, tmax = 10 * da$max,
@@ -1177,8 +1178,8 @@ Strata = function (x, stratanames, size, n, K)
     for(i in 1:length(size)){
       # sample the i'th strata
       if(size[i]>0){
-          tmp <- sample(nrow(x[[i]]),size[i])
-          idx[i,1:size[i],k] = x[[i]]$id[tmp]
+        tmp <- sample(nrow(x[[i]]),size[i])
+        idx[i,1:size[i],k] = x[[i]]$id[tmp]
       }
     }
   }
